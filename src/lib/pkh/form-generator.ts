@@ -97,31 +97,32 @@ function checkForCell(rowIdx: number, monthIdx: number, present: boolean): strin
 
 /* ============================================================
    BSrE (Badan Siber dan Sandi Negara) digital stamp
-   Circular red seal with QR simulation
+   Circular dark-blue seal with QR simulation
+   70% transparent (opacity 0.3) for natural faded ink-impression look
    ============================================================ */
 function bsreStampSVG(): string {
   return `
-  <div class="bsre-stamp" aria-label="BSrE Digital Signature Stamp">
+  <div class="bsre-stamp" aria-label="BSrE Digital Signature Stamp" style="opacity:0.3;">
     <svg width="115" height="115" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <path id="circleTop" d="M 60,60 m -42,0 a 42,42 0 1,1 84,0" fill="none" />
         <path id="circleBottom" d="M 60,60 m -42,0 a 42,42 0 1,0 84,0" fill="none" />
       </defs>
-      <circle cx="60" cy="60" r="55" fill="none" stroke="#b91c1c" stroke-width="2" opacity="0.85"/>
-      <circle cx="60" cy="60" r="48" fill="none" stroke="#b91c1c" stroke-width="1" opacity="0.7"/>
-      <circle cx="60" cy="60" r="42" fill="none" stroke="#b91c1c" stroke-width="1" opacity="0.5" stroke-dasharray="2 2"/>
-      <text font-family="Arial, sans-serif" font-size="7" fill="#b91c1c" font-weight="bold" letter-spacing="0.8">
+      <circle cx="60" cy="60" r="55" fill="none" stroke="#1e3a5f" stroke-width="2.5" opacity="1"/>
+      <circle cx="60" cy="60" r="48" fill="none" stroke="#1e3a5f" stroke-width="1.2" opacity="0.85"/>
+      <circle cx="60" cy="60" r="42" fill="none" stroke="#1e3a5f" stroke-width="1" opacity="0.65" stroke-dasharray="2 2"/>
+      <text font-family="Arial, sans-serif" font-size="7" fill="#1e3a5f" font-weight="bold" letter-spacing="0.8">
         <textPath href="#circleTop" startOffset="50%" text-anchor="middle">BADAN SIBER DAN SANDI NEGARA</textPath>
       </text>
-      <text font-family="Arial, sans-serif" font-size="6" fill="#b91c1c" letter-spacing="0.5">
+      <text font-family="Arial, sans-serif" font-size="6" fill="#1e3a5f" letter-spacing="0.5">
         <textPath href="#circleBottom" startOffset="50%" text-anchor="middle">SERTIFIKAT ELEKTRONIK TERVERIFIKASI</textPath>
       </text>
       <g transform="translate(60,60)">
-        <circle r="20" fill="#b91c1c" opacity="0.08"/>
-        <text x="0" y="-2" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#b91c1c" font-weight="bold">BSrE</text>
-        <text x="0" y="8" text-anchor="middle" font-family="Arial, sans-serif" font-size="4.5" fill="#b91c1c">TERSERTIFIKASI</text>
-        <line x1="-14" y1="13" x2="14" y2="13" stroke="#b91c1c" stroke-width="0.5"/>
-        <text x="0" y="18" text-anchor="middle" font-family="Arial, sans-serif" font-size="3.5" fill="#b91c1c">e-SIGN VERIFIED</text>
+        <circle r="20" fill="#1e3a5f" opacity="0.12"/>
+        <text x="0" y="-2" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#1e3a5f" font-weight="bold">BSrE</text>
+        <text x="0" y="8" text-anchor="middle" font-family="Arial, sans-serif" font-size="4.5" fill="#1e3a5f">TERSERTIFIKASI</text>
+        <line x1="-14" y1="13" x2="14" y2="13" stroke="#1e3a5f" stroke-width="0.5"/>
+        <text x="0" y="18" text-anchor="middle" font-family="Arial, sans-serif" font-size="3.5" fill="#1e3a5f">e-SIGN VERIFIED</text>
       </g>
     </svg>
   </div>`
@@ -157,17 +158,19 @@ function signatureBlock(name: string, nip: string, role: string): string {
 }
 
 /* ============================================================
-   Kementerian Sosial emblem
+   Institutional logo — uses uploaded logo image (default /pkh-logo.png)
+   Falls back to an inline SVG emblem when no image is available.
    ============================================================ */
-function kemsosLogo(): string {
-  return `
-  <svg width="64" height="74" viewBox="0 0 70 80" xmlns="http://www.w3.org/2000/svg" aria-label="Logo Kementerian Sosial">
-    <path d="M35 2 L65 12 V40 C65 58 52 72 35 78 C18 72 5 58 5 40 V12 Z" fill="#dc2626" stroke="#991b1b" stroke-width="1.5"/>
-    <path d="M35 8 L59 16 V40 C59 54 49 66 35 71 C21 66 11 54 11 40 V16 Z" fill="#fef2f2" stroke="#dc2626" stroke-width="0.8"/>
-    <text x="35" y="30" text-anchor="middle" font-family="Arial" font-size="9" font-weight="bold" fill="#dc2626">KEMEN</text>
-    <text x="35" y="40" text-anchor="middle" font-family="Arial" font-size="9" font-weight="bold" fill="#dc2626">SOS</text>
-    <path d="M35 44 L40 50 L35 56 L30 50 Z" fill="#dc2626"/>
-    <text x="35" y="66" text-anchor="middle" font-family="Arial" font-size="4" fill="#dc2626">PKH</text>
+function kemsosLogo(logoUrl?: string): string {
+  const src = logoUrl && logoUrl.trim() ? logoUrl.trim() : '/pkh-logo.png'
+  return `<img src="${src}" alt="Logo Lembaga" width="64" height="74" style="object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block';"/>
+  <svg width="64" height="74" viewBox="0 0 70 80" xmlns="http://www.w3.org/2000/svg" aria-label="Logo Lembaga" style="display:none;">
+    <path d="M35 2 L65 12 V40 C65 58 52 72 35 78 C18 72 5 58 5 40 V12 Z" fill="#1e3a5f" stroke="#172a4a" stroke-width="1.5"/>
+    <path d="M35 8 L59 16 V40 C59 54 49 66 35 71 C21 66 11 54 11 40 V16 Z" fill="#eff6ff" stroke="#1e3a5f" stroke-width="0.8"/>
+    <text x="35" y="30" text-anchor="middle" font-family="Arial" font-size="9" font-weight="bold" fill="#1e3a5f">KEMEN</text>
+    <text x="35" y="40" text-anchor="middle" font-family="Arial" font-size="9" font-weight="bold" fill="#1e3a5f">SOS</text>
+    <path d="M35 44 L40 50 L35 56 L30 50 Z" fill="#1e3a5f"/>
+    <text x="35" y="66" text-anchor="middle" font-family="Arial" font-size="4" fill="#1e3a5f">PKH</text>
   </svg>`
 }
 
@@ -213,7 +216,7 @@ function formCSS(): string {
     .signature-area .place-date { margin-bottom: 8px; font-size: 10px; }
     .signature-area .role-label { font-size: 9px; margin-bottom: 50px; }
     .signature-block { position: relative; display: inline-block; }
-    .sig-stamp-overlay { position: absolute; top: -40px; left: 50%; transform: translateX(-35%) rotate(-12deg); opacity: 0.9; z-index: 2; pointer-events: none; }
+    .sig-stamp-overlay { position: absolute; top: -40px; left: 50%; transform: translateX(-35%) rotate(-12deg); z-index: 2; pointer-events: none; }
     .sig-name-svg { display: flex; justify-content: center; margin-bottom: 2px; }
     .sig-line { border-top: 1px solid #1a1a1a; width: 85%; margin: 0 auto 2px; }
     .sig-name { font-size: 10px; }
@@ -221,11 +224,11 @@ function formCSS(): string {
     .sig-role { font-size: 8.5px; color: #555; margin-top: 1px; }
     .bsre-stamp { display: inline-block; }
     .note-box { margin-top: 12px; padding: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 8.5px; border-radius: 3px; }
-    .note-box strong { color: #b91c1c; }
+    .note-box strong { color: #1e3a5f; }
     .note-box ul { margin: 4px 0 0 16px; padding: 0; }
     .note-box li { margin-bottom: 2px; }
-    .bsre-note { margin-top: 10px; padding: 8px; border: 1px solid #b91c1c; background: #fef2f2; font-size: 8.5px; border-radius: 3px; text-align: center; }
-    .bsre-note strong { color: #b91c1c; }
+    .bsre-note { margin-top: 10px; padding: 8px; border: 1px solid #1e3a5f; background: #eff6ff; font-size: 8.5px; border-radius: 3px; text-align: center; }
+    .bsre-note strong { color: #1e3a5f; }
     .legend { display: flex; gap: 16px; font-size: 8.5px; margin-top: 6px; align-items: center; flex-wrap: wrap; }
     .legend-item { display: flex; gap: 4px; align-items: center; }
     .form-title-banner { background: #1e3a5f; color: #fff; padding: 6px 12px; text-align: center; font-weight: bold; font-size: 12px; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px; }
@@ -368,7 +371,7 @@ function buildAttendanceTable(data: PKHFormData): string {
       <td class="nama-cell" style="font-size:8px;">${r.alamat || '-'}</td>
       <td>${r.kelurahan || data.kelurahan || '-'}</td>
       <td>${r.jenisBantuan || 'PKH Reguler'}</td>
-      <td style="font-size:8px;">${r.jumlahBantuan || '-'}<br/><span style="font-size:7px;color:${r.status === 'Aktif' ? '#16a34a' : '#b91c1c'};">${r.status || 'Aktif'}</span></td>`
+      <td style="font-size:8px;">${r.jumlahBantuan || '-'}<br/><span style="font-size:7px;color:${r.status === 'Aktif' ? '#16a34a' : '#1e3a5f'};">${r.status || 'Aktif'}</span></td>`
   }
 
   const monthGroupHeaders = months
@@ -387,7 +390,7 @@ function buildAttendanceTable(data: PKHFormData): string {
       <tr>
         ${renderIdCells(r)}
         ${buildAttendanceCells(r, idx)}
-        <td style="font-size:8px;font-weight:600;color:${avgPct >= 75 ? '#16a34a' : '#b91c1c'};">${keterangan}</td>
+        <td style="font-size:8px;font-weight:600;color:${avgPct >= 75 ? '#16a34a' : '#1e3a5f'};">${keterangan}</td>
         <td style="font-size:8px;">${r.namaPendamping || data.facilitator || '-'}</td>
       </tr>`
     })
@@ -511,7 +514,7 @@ export function generateFormHTML(data: PKHFormData): string {
   <div class="page">
     <div class="form-header">
       <div class="header-left">
-        ${kemsosLogo()}
+        ${kemsosLogo(data.logoUrl)}
         <div class="header-title">
           <h1>${title}</h1>
           <h2>${subtitle}</h2>
@@ -521,7 +524,7 @@ export function generateFormHTML(data: PKHFormData): string {
       <div class="header-right">
         <div class="doc-id">PKH-${data.formType.toUpperCase().slice(0, 3)}-${data.tahun || new Date().getFullYear()}</div>
         <div>Triwulan ${data.triwulan || ''}</div>
-        <div style="color:#b91c1c;font-weight:bold;margin-top:3px;">☑ Disahkan dengan BSrE</div>
+        <div style="color:#1e3a5f;font-weight:bold;margin-top:3px;">☑ Disahkan dengan BSrE</div>
       </div>
     </div>
 
@@ -577,7 +580,7 @@ export function generateCombinedHTML(forms: PKHFormData[]): string {
     .page-break:last-child { page-break-after: auto; }
     .cover-page { height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; page-break-after: always; }
     .cover-page h1 { font-size: 28px; color: #1e3a5f; margin-bottom: 8px; }
-    .cover-page h2 { font-size: 18px; color: #dc2626; }
+    .cover-page h2 { font-size: 18px; color: #1e3a5f; }
   </style>
 </head>
 <body>

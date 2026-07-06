@@ -7,7 +7,7 @@ import {
   Database, ShieldCheck, ArrowRight, ArrowLeft, RefreshCw,
   Eye, Table2, AlertTriangle,
   ClipboardCheck, Layers, ChevronRight, FileCheck2, MapPin,
-  PenTool, Stamp,
+  PenTool, Stamp, ImagePlus, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -301,7 +301,7 @@ function Header({ onReset, hasData }: { onReset: () => void; hasData: boolean })
     <header className="sticky top-0 z-40 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/75">
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-red-600 to-red-700 flex items-center justify-center text-white font-bold shadow-sm">
+          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-900 to-blue-950 flex items-center justify-center text-white font-bold shadow-sm">
             KS
           </div>
           <div>
@@ -331,7 +331,7 @@ function Hero() {
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="inline-flex items-center gap-2 rounded-full border bg-red-50 px-3 py-1 text-xs font-medium text-red-700 mb-4"
+        className="inline-flex items-center gap-2 rounded-full border bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 mb-4"
       >
         <Sparkles className="h-3 w-3" /> Sistem Otomasi Dokumen PKH
       </motion.div>
@@ -355,7 +355,7 @@ function Hero() {
           { icon: FileDown, label: 'PDF Export' },
         ].map((f) => (
           <span key={f.label} className="inline-flex items-center gap-1.5 rounded-md border bg-white px-2.5 py-1 text-slate-600">
-            <f.icon className="h-3 w-3 text-red-600" /> {f.label}
+            <f.icon className="h-3 w-3 text-blue-900" /> {f.label}
           </span>
         ))}
       </div>
@@ -380,13 +380,13 @@ function Stepper({ currentStep }: { currentStep: number }) {
                     isDone
                       ? 'bg-green-600 border-green-600 text-white'
                       : isCurrent
-                      ? 'bg-red-600 border-red-600 text-white shadow-md shadow-red-200'
+                      ? 'bg-blue-900 border-blue-950 text-white shadow-md shadow-blue-200'
                       : 'bg-white border-slate-200 text-slate-400'
                   }`}
                 >
                   {isDone ? <CheckCircle2 className="h-5 w-5" /> : <Icon className="h-4 w-4" />}
                 </div>
-                <div className={`text-[11px] font-medium text-center ${isCurrent ? 'text-red-700' : isDone ? 'text-green-700' : 'text-slate-400'}`}>
+                <div className={`text-[11px] font-medium text-center ${isCurrent ? 'text-blue-800' : isDone ? 'text-green-700' : 'text-slate-400'}`}>
                   {s.name}
                 </div>
               </div>
@@ -415,10 +415,10 @@ function UploadStep({
   return (
     <div className="grid lg:grid-cols-2 gap-6">
       {/* Upload zone */}
-      <Card className="border-2 border-dashed border-slate-200 hover:border-red-300 transition-colors">
+      <Card className="border-2 border-dashed border-slate-200 hover:border-blue-300 transition-colors">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Upload className="h-4 w-4 text-red-600" /> Unggah File Dokumen
+            <Upload className="h-4 w-4 text-blue-900" /> Unggah File Dokumen
           </CardTitle>
           <CardDescription>Dukungan PDF, TXT, JSON, CSV, DOCX, XLSX</CardDescription>
         </CardHeader>
@@ -433,7 +433,7 @@ function UploadStep({
             }}
             onClick={() => inputRef.current?.click()}
             className={`rounded-lg border-2 border-dashed p-10 text-center cursor-pointer transition-all ${
-              dragOver ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-50'
+              dragOver ? 'border-blue-700 bg-blue-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-50'
             }`}
           >
             <input
@@ -448,14 +448,14 @@ function UploadStep({
             />
             {loading ? (
               <div className="flex flex-col items-center gap-2">
-                <Loader2 className="h-8 w-8 text-red-600 animate-spin" />
+                <Loader2 className="h-8 w-8 text-blue-900 animate-spin" />
                 <p className="text-sm text-muted-foreground">Memproses dokumen...</p>
                 <p className="text-[11px] text-slate-400">Ekstraksi teks PDF mungkin membutuhkan beberapa detik</p>
               </div>
             ) : (
               <>
-                <div className="mx-auto h-12 w-12 rounded-full bg-red-100 flex items-center justify-center mb-3">
-                  <FileText className="h-6 w-6 text-red-600" />
+                <div className="mx-auto h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center mb-3">
+                  <FileText className="h-6 w-6 text-blue-900" />
                 </div>
                 <p className="text-sm font-medium text-slate-700">Tarik & lepas file di sini</p>
                 <p className="text-xs text-muted-foreground mt-1">atau klik untuk memilih file</p>
@@ -474,7 +474,7 @@ function UploadStep({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Database className="h-4 w-4 text-red-600" /> Muat Data Contoh
+            <Database className="h-4 w-4 text-blue-900" /> Muat Data Contoh
           </CardTitle>
           <CardDescription>Coba langsung dengan data PKH contoh yang realistis</CardDescription>
         </CardHeader>
@@ -524,7 +524,7 @@ function SampleButton({
     <button
       onClick={onClick}
       disabled={loading}
-      className="w-full text-left rounded-lg border p-3 hover:border-red-300 hover:bg-red-50/40 transition-colors disabled:opacity-50 group"
+      className="w-full text-left rounded-lg border p-3 hover:border-blue-300 hover:bg-blue-50/40 transition-colors disabled:opacity-50 group"
     >
       <div className="flex items-center gap-3">
         <div className={`h-9 w-9 rounded-md ${color} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
@@ -533,7 +533,7 @@ function SampleButton({
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-slate-800 flex items-center gap-1">
             {title}
-            <ChevronRight className="h-3.5 w-3.5 text-slate-400 group-hover:text-red-600 transition-colors ml-auto" />
+            <ChevronRight className="h-3.5 w-3.5 text-slate-400 group-hover:text-blue-900 transition-colors ml-auto" />
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">{desc}</div>
         </div>
@@ -616,7 +616,7 @@ function ReviewStep({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Table2 className="h-4 w-4 text-red-600" /> Konfigurasi & Metadata Formulir
+            <Table2 className="h-4 w-4 text-blue-900" /> Konfigurasi & Metadata Formulir
           </CardTitle>
           <CardDescription>
             Verifikasi jenis formulir, triwulan, dan lengkapi metadata sesuai dokumen sumber
@@ -663,8 +663,12 @@ function ReviewStep({
 
           <Separator className="my-4" />
 
+          <LogoUploader logoUrl={data.logoUrl} onChange={(v) => onMeta('logoUrl', v)} />
+
+          <Separator className="my-4" />
+
           <div className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
-            <PenTool className="h-3.5 w-3.5 text-red-600" /> Penandatangan (1 tanda tangan & stempel BSrE)
+            <PenTool className="h-3.5 w-3.5 text-blue-900" /> Penandatangan (1 tanda tangan & stempel BSrE)
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-1.5">
@@ -691,7 +695,7 @@ function ReviewStep({
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
-                <Database className="h-4 w-4 text-red-600" /> Data Peserta
+                <Database className="h-4 w-4 text-blue-900" /> Data Peserta
               </CardTitle>
               <CardDescription>{data.records.length} catatan terdeteksi • Triwulan {data.triwulan} ({data.months.join(', ')})</CardDescription>
             </div>
@@ -715,6 +719,87 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
     <div className="space-y-1.5">
       <Label className="text-xs">{label}</Label>
       <Input value={value} onChange={(e) => onChange(e.target.value)} className="text-sm" />
+    </div>
+  )
+}
+
+/* ---------------- Logo Uploader ---------------- */
+function LogoUploader({ logoUrl, onChange }: { logoUrl?: string; onChange: (v: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const handleFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('File harus berupa gambar (PNG/JPG/SVG)')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Ukuran logo maksimal 2MB')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      onChange(reader.result as string)
+      toast.success('Logo berhasil diunggah')
+    }
+    reader.onerror = () => toast.error('Gagal membaca file logo')
+    reader.readAsDataURL(file)
+  }
+
+  return (
+    <div className="space-y-2">
+      <Label className="text-xs flex items-center gap-1.5">
+        <ImagePlus className="h-3.5 w-3.5 text-blue-900" /> Logo Lembaga (Opsional — tampil di header formulir)
+      </Label>
+      <div className="flex items-center gap-3">
+        <div className="h-16 w-16 rounded-md border bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+          {logoUrl ? (
+            <img src={logoUrl} alt="Logo terunggah" className="h-full w-full object-contain" />
+          ) : (
+            <img src="/pkh-logo.png" alt="Logo default" className="h-full w-full object-contain opacity-70" />
+          )}
+        </div>
+        <div className="flex-1 flex flex-col gap-1.5">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/svg+xml,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleFile(f)
+              e.target.value = ''
+            }}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => inputRef.current?.click()}
+              className="gap-1.5 text-xs h-8"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              {logoUrl ? 'Ganti Logo' : 'Upload Logo Manual'}
+            </Button>
+            {logoUrl && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => { onChange(''); toast.info('Logo dikembalikan ke default') }}
+                className="gap-1.5 text-xs h-8 text-muted-foreground"
+              >
+                <X className="h-3.5 w-3.5" /> Hapus
+              </Button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {logoUrl
+              ? 'Logo custom aktif. Klik "Hapus" untuk kembali ke logo default.'
+              : 'Menggunakan logo default. Upload logo manual untuk mengganti (PNG/JPG/SVG, max 2MB).'}
+          </p>
+        </div>
+      </div>
     </div>
   )
 }
@@ -770,7 +855,7 @@ function RecordsTable({ data }: { data: PKHFormData }) {
                 </td>
               ))}
               <td className="p-2 text-center">
-                <span className={`font-semibold ${avgPct >= 75 ? 'text-green-600' : avgPct >= 50 ? 'text-amber-600' : 'text-red-600'}`}>{avgPct}%</span>
+                <span className={`font-semibold ${avgPct >= 75 ? 'text-green-600' : avgPct >= 50 ? 'text-amber-600' : 'text-blue-900'}`}>{avgPct}%</span>
               </td>
             </tr>
           )
@@ -798,7 +883,7 @@ function GenerateStep({
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
-                <FileText className="h-4 w-4 text-red-600" /> Hasilkan Formulir HTML
+                <FileText className="h-4 w-4 text-blue-900" /> Hasilkan Formulir HTML
               </CardTitle>
               <CardDescription>Generate dokumen lengkap dengan 7 variasi centang SVG, 1 tanda tangan & stempel BSrE</CardDescription>
             </div>
@@ -832,7 +917,7 @@ function GenerateStep({
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
-                <Eye className="h-4 w-4 text-red-600" /> Pratinjau Dokumen
+                <Eye className="h-4 w-4 text-blue-900" /> Pratinjau Dokumen
               </CardTitle>
               <Tabs value={previewTab} onValueChange={(v) => setPreviewTab(v as 'form' | 'source')}>
                 <TabsList className="h-8">
@@ -891,7 +976,7 @@ function ExportStep({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <FileDown className="h-4 w-4 text-red-600" /> Ekspor Dokumen PDF
+            <FileDown className="h-4 w-4 text-blue-900" /> Ekspor Dokumen PDF
           </CardTitle>
           <CardDescription>Konversi formulir HTML menjadi PDF siap cetak (A4 Landscape)</CardDescription>
         </CardHeader>
@@ -899,7 +984,7 @@ function ExportStep({
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="rounded-lg border p-4 bg-gradient-to-br from-slate-50 to-white">
               <div className="flex items-center gap-2 mb-3">
-                <FileText className="h-5 w-5 text-red-600" />
+                <FileText className="h-5 w-5 text-blue-900" />
                 <span className="font-medium text-sm">Dokumen Formulir</span>
               </div>
               <div className="space-y-1.5 text-xs text-slate-600">
@@ -913,7 +998,7 @@ function ExportStep({
               </div>
             </div>
 
-            <div className="rounded-lg border p-4 bg-gradient-to-br from-red-50/50 to-white">
+            <div className="rounded-lg border p-4 bg-gradient-to-br from-blue-50/50 to-white">
               <div className="flex items-center gap-2 mb-3">
                 <ShieldCheck className="h-5 w-5 text-green-600" />
                 <span className="font-medium text-sm">Status Verifikasi</span>
@@ -946,7 +1031,7 @@ function ExportStep({
                 ? 'Formulir siap diekspor. Klik tombol di kanan untuk mengunduh PDF.'
                 : 'Klik tombol di kanan untuk generate + ekspor sekaligus.'}
             </div>
-            <Button size="lg" onClick={onExport} disabled={loading} className="gap-2 bg-red-600 hover:bg-red-700">
+            <Button size="lg" onClick={onExport} disabled={loading} className="gap-2 bg-blue-900 hover:bg-blue-950">
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileDown className="h-5 w-5" />}
               {loading ? 'Mengonversi...' : 'Unduh PDF'}
             </Button>
@@ -976,7 +1061,7 @@ function Footer() {
     <footer className="mt-auto border-t bg-white">
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="h-3.5 w-3.5 text-red-600" />
+          <ShieldCheck className="h-3.5 w-3.5 text-blue-900" />
           <span>PKH Document Generator &middot; Kementerian Sosial RI</span>
         </div>
         <div className="flex items-center gap-3">

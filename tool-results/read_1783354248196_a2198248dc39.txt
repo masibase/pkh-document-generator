@@ -1,0 +1,993 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useCallback, useRef, useMemo } from 'react'
+     4→     4→import { motion, AnimatePresence } from 'framer-motion'
+     5→     5→import {
+     6→     6→  Upload, FileText, Sparkles, FileDown, CheckCircle2, Loader2,
+     7→     7→  Database, ShieldCheck, ArrowRight, ArrowLeft, RefreshCw,
+     8→     8→  Eye, Table2, AlertTriangle,
+     9→     9→  ClipboardCheck, Layers, ChevronRight, FileCheck2, MapPin,
+    10→    10→  PenTool, Stamp,
+    11→    11→} from 'lucide-react'
+    12→    12→import { Button } from '@/components/ui/button'
+    13→    13→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    14→    14→import { Badge } from '@/components/ui/badge'
+    15→    15→import { Input } from '@/components/ui/input'
+    16→    16→import { Label } from '@/components/ui/label'
+    17→    17→import { Separator } from '@/components/ui/separator'
+    18→    18→import { Alert, AlertDescription } from '@/components/ui/alert'
+    19→    19→import { ScrollArea } from '@/components/ui/scroll-area'
+    20→    20→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    21→    21→import {
+    22→    22→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    23→    23→} from '@/components/ui/select'
+    24→    24→import { toast } from 'sonner'
+    25→    25→import {
+    26→    26→  FormType, PKHFormData, FORM_TYPE_LABELS,
+    27→    27→} from '@/lib/pkh/types'
+    28→    28→
+    29→    29→type Step = 0 | 1 | 2 | 3
+    30→    30→
+    31→    31→const STEPS = [
+    32→    32→  { id: 0, name: 'Upload Data', icon: Upload, desc: 'Muat file PDF/dokumen atau data contoh' },
+    33→    33→  { id: 1, name: 'Tinjau Data', icon: Table2, desc: 'Verifikasi data dan jenis formulir' },
+    34→    34→  { id: 2, name: 'Hasilkan Formulir', icon: FileText, desc: 'Generate HTML dengan tanda tangan & BSrE' },
+    35→    35→  { id: 3, name: 'Ekspor PDF', icon: FileDown, desc: 'Konversi dan unduh dokumen PDF' },
+    36→    36→]
+    37→    37→
+    38→    38→export default function Home() {
+    39→    39→  const [step, setStep] = useState<Step>(0)
+    40→    40→  const [formData, setFormData] = useState<PKHFormData | null>(null)
+    41→    41→  const [generatedHTML, setGeneratedHTML] = useState<string>('')
+    42→    42→  const [loading, setLoading] = useState<'parse' | 'generate' | 'pdf' | null>(null)
+    43→    43→  const [previewTab, setPreviewTab] = useState<'form' | 'source'>('form')
+    44→    44→  const [sourceFile, setSourceFile] = useState<string>('')
+    45→    45→  const [sourceType, setSourceType] = useState<string>('')
+    46→    46→
+    47→    47→  // ---- Step 0: Upload ----
+    48→    48→  const handleFile = useCallback(async (file: File) => {
+    49→    49→    setLoading('parse')
+    50→    50→    try {
+    51→    51→      const fd = new FormData()
+    52→    52→      fd.append('file', file)
+    53→    53→      const res = await fetch('/api/pkh/parse', { method: 'POST', body: fd })
+    54→    54→      const json = await res.json()
+    55→    55→      if (json.success && json.data) {
+    56→    56→        setFormData(json.data)
+    57→    57→        setSourceFile(json.sourceFile || file.name)
+    58→    58→        setSourceType(json.sourceType || '')
+    59→    59→        setStep(1)
+    60→    60→        const wilayahOk = json.data.provinsi || json.data.kabupaten || json.data.kecamatan || json.data.kelurahan
+    61→    61→        toast.success(
+    62→    62→          `Terdeteksi: ${FORM_TYPE_LABELS[json.formType]} • ${json.totalRecords} catatan` +
+    63→    63→          (wilayahOk ? ' • Wilayah dari dokumen' : ' • Lengkapi wilayah manual')
+    64→    64→        )
+    65→    65→      } else {
+    66→    66→        toast.error(json.error || 'Gagal memproses file')
+    67→    67→      }
+    68→    68→    } catch {
+    69→    69→      toast.error('Gagal mengunggah file')
+    70→    70→    } finally {
+    71→    71→      setLoading(null)
+    72→    72→    }
+    73→    73→  }, [])
+    74→    74→
+    75→    75→  const loadSample = useCallback(async (type: FormType) => {
+    76→    76→    setLoading('parse')
+    77→    77→    try {
+    78→    78→      const res = await fetch('/api/pkh/sample-data', {
+    79→    79→        method: 'POST',
+    80→    80→        headers: { 'Content-Type': 'application/json' },
+    81→    81→        body: JSON.stringify({ formType: type, count: 12 }),
+    82→    82→      })
+    83→    83→      const json = await res.json()
+    84→    84→      if (json.success && json.data) {
+    85→    85→        setFormData(json.data)
+    86→    86→        setSourceFile(`Data Contoh — ${FORM_TYPE_LABELS[type]}`)
+    87→    87→        setSourceType('sample')
+    88→    88→        setStep(1)
+    89→    89→        toast.success(`Data contoh ${FORM_TYPE_LABELS[type]} dimuat (${json.data.records.length} catatan)`)
+    90→    90→      }
+    91→    91→    } catch {
+    92→    92→      toast.error('Gagal memuat data contoh')
+    93→    93→    } finally {
+    94→    94→      setLoading(null)
+    95→    95→    }
+    96→    96→  }, [])
+    97→    97→
+    98→    98→  // ---- Step 1: Review ----
+    99→    99→  const updateMeta = (field: keyof PKHFormData, value: string) => {
+   100→   100→    setFormData((prev) => (prev ? { ...prev, [field]: value } : prev))
+   101→   101→  }
+   102→   102→  const updateMetaNumber = (field: keyof PKHFormData, value: number) => {
+   103→   103→    setFormData((prev) => (prev ? { ...prev, [field]: value } : prev))
+   104→   104→  }
+   105→   105→  const changeFormType = (type: FormType) => {
+   106→   106→    setFormData((prev) => prev ? {
+   107→   107→      ...prev,
+   108→   108→      formType: type,
+   109→   109→      signerRole: type === 'education' ? 'Kepala Sekolah' : (type === 'health' ? 'Kepala Desa' : 'Koordinator PKH'),
+   110→   110→    } : prev)
+   111→   111→  }
+   112→   112→  const changeTriwulan = (triwulan: number) => {
+   113→   113→    setFormData((prev) => {
+   114→   114→      if (!prev) return prev
+   115→   115→      const monthsMap: Record<number, string[]> = {
+   116→   116→        1: ['JANUARI', 'FEBRUARI', 'MARET'],
+   117→   117→        2: ['APRIL', 'MEI', 'JUNI'],
+   118→   118→        3: ['JULI', 'AGUSTUS', 'SEPTEMBER'],
+   119→   119→        4: ['OKTOBER', 'NOVEMBER', 'DESEMBER'],
+   120→   120→      }
+   121→   121→      const months = monthsMap[triwulan] || monthsMap[2]
+   122→   122→      return {
+   123→   123→        ...prev,
+   124→   124→        triwulan,
+   125→   125→        months,
+   126→   126→        periode: `TRIWULAN ${triwulan} TAHUN ${prev.tahun || new Date().getFullYear()}`,
+   127→   127→      }
+   128→   128→    })
+   129→   129→  }
+   130→   130→
+   131→   131→  // ---- Step 2: Generate ----
+   132→   132→  const generateForm = useCallback(async () => {
+   133→   133→    if (!formData) return
+   134→   134→    setLoading('generate')
+   135→   135→    setGeneratedHTML('')
+   136→   136→    try {
+   137→   137→      const res = await fetch('/api/pkh/generate', {
+   138→   138→        method: 'POST',
+   139→   139→        headers: { 'Content-Type': 'application/json' },
+   140→   140→        body: JSON.stringify({ mode: 'single', data: formData }),
+   141→   141→      })
+   142→   142→      const json = await res.json()
+   143→   143→      if (json.success) {
+   144→   144→        setGeneratedHTML(json.html)
+   145→   145→        toast.success('Formulir HTML berhasil dihasilkan')
+   146→   146→      } else {
+   147→   147→        toast.error(json.error || 'Gagal generate')
+   148→   148→      }
+   149→   149→    } catch {
+   150→   150→      toast.error('Gagal menghasilkan formulir')
+   151→   151→    } finally {
+   152→   152→      setLoading(null)
+   153→   153→    }
+   154→   154→  }, [formData])
+   155→   155→
+   156→   156→  // ---- Step 3: Export PDF ----
+   157→   157→  const exportPDF = useCallback(async () => {
+   158→   158→    if (!generatedHTML) return
+   159→   159→    setLoading('pdf')
+   160→   160→    try {
+   161→   161→      const res = await fetch('/api/pkh/export-pdf', {
+   162→   162→        method: 'POST',
+   163→   163→        headers: { 'Content-Type': 'application/json' },
+   164→   164→        body: JSON.stringify({
+   165→   165→          html: generatedHTML,
+   166→   166→          filename: `PKH-${formData?.formType || 'form'}-${Date.now()}`,
+   167→   167→        }),
+   168→   168→      })
+   169→   169→      if (!res.ok) {
+   170→   170→        const err = await res.json().catch(() => ({}))
+   171→   171→        throw new Error(err.error || 'Export gagal')
+   172→   172→      }
+   173→   173→      const blob = await res.blob()
+   174→   174→      const url = URL.createObjectURL(blob)
+   175→   175→      const a = document.createElement('a')
+   176→   176→      a.href = url
+   177→   177→      a.download = `PKH-${formData?.formType || 'form'}.pdf`
+   178→   178→      document.body.appendChild(a)
+   179→   179→      a.click()
+   180→   180→      document.body.removeChild(a)
+   181→   181→      URL.revokeObjectURL(url)
+   182→   182→      toast.success('PDF berhasil diunduh')
+   183→   183→    } catch (e) {
+   184→   184→      toast.error(e instanceof Error ? e.message : 'Gagal ekspor PDF')
+   185→   185→    } finally {
+   186→   186→      setLoading(null)
+   187→   187→    }
+   188→   188→  }, [generatedHTML, formData])
+   189→   189→
+   190→   190→  const resetAll = () => {
+   191→   191→    setFormData(null)
+   192→   192→    setGeneratedHTML('')
+   193→   193→    setSourceFile('')
+   194→   194→    setSourceType('')
+   195→   195→    setStep(0)
+   196→   196→  }
+   197→   197→
+   198→   198→  const canGoNext = useMemo(() => {
+   199→   199→    if (step === 0) return !!formData
+   200→   200→    if (step === 1) return !!formData
+   201→   201→    if (step === 2) return !!generatedHTML
+   202→   202→    return true
+   203→   203→  }, [step, formData, generatedHTML])
+   204→   204→
+   205→   205→  return (
+   206→   206→    <div className="min-h-screen flex flex-col bg-gradient-to-b from-slate-50 to-white">
+   207→   207→      <Header onReset={resetAll} hasData={!!formData} />
+   208→   208→
+   209→   209→      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+   210→   210→        {/* Hero / intro */}
+   211→   211→        {step === 0 && !formData && <Hero />}
+   212→   212→
+   213→   213→        {/* Stepper */}
+   214→   214→        <Stepper currentStep={step} />
+   215→   215→
+   216→   216→        {/* Step content */}
+   217→   217→        <div className="mt-6">
+   218→   218→          <AnimatePresence mode="wait">
+   219→   219→            <motion.div
+   220→   220→              key={step}
+   221→   221→              initial={{ opacity: 0, x: 20 }}
+   222→   222→              animate={{ opacity: 1, x: 0 }}
+   223→   223→              exit={{ opacity: 0, x: -20 }}
+   224→   224→              transition={{ duration: 0.25 }}
+   225→   225→            >
+   226→   226→              {step === 0 && (
+   227→   227→                <UploadStep onFile={handleFile} onSample={loadSample} loading={loading === 'parse'} />
+   228→   228→              )}
+   229→   229→              {step === 1 && formData && (
+   230→   230→                <ReviewStep
+   231→   231→                  data={formData}
+   232→   232→                  onMeta={updateMeta}
+   233→   233→                  onMetaNumber={updateMetaNumber}
+   234→   234→                  onType={changeFormType}
+   235→   235→                  onTriwulan={changeTriwulan}
+   236→   236→                  sourceFile={sourceFile}
+   237→   237→                  sourceType={sourceType}
+   238→   238→                />
+   239→   239→              )}
+   240→   240→              {step === 2 && formData && (
+   241→   241→                <GenerateStep
+   242→   242→                  data={formData}
+   243→   243→                  html={generatedHTML}
+   244→   244→                  loading={loading === 'generate'}
+   245→   245→                  onGenerate={generateForm}
+   246→   246→                  previewTab={previewTab}
+   247→   247→                  setPreviewTab={setPreviewTab}
+   248→   248→                />
+   249→   249→              )}
+   250→   250→              {step === 3 && formData && (
+   251→   251→                <ExportStep
+   252→   252→                  formData={formData}
+   253→   253→                  hasHTML={!!generatedHTML}
+   254→   254→                  loading={loading === 'pdf'}
+   255→   255→                  onExport={exportPDF}
+   256→   256→                />
+   257→   257→              )}
+   258→   258→            </motion.div>
+   259→   259→          </AnimatePresence>
+   260→   260→        </div>
+   261→   261→
+   262→   262→        {/* Navigation */}
+   263→   263→        <div className="mt-8 flex items-center justify-between gap-3">
+   264→   264→          <Button
+   265→   265→            variant="outline"
+   266→   266→            onClick={() => setStep((s) => Math.max(0, s - 1) as Step)}
+   267→   267→            disabled={step === 0}
+   268→   268→            className="gap-2"
+   269→   269→          >
+   270→   270→            <ArrowLeft className="h-4 w-4" /> Sebelumnya
+   271→   271→          </Button>
+   272→   272→
+   273→   273→          <div className="text-xs text-muted-foreground hidden sm:block">
+   274→   274→            Langkah {step + 1} dari {STEPS.length}
+   275→   275→          </div>
+   276→   276→
+   277→   277→          {step < 3 ? (
+   278→   278→            <Button
+   279→   279→              onClick={() => setStep((s) => Math.min(3, s + 1) as Step)}
+   280→   280→              disabled={!canGoNext}
+   281→   281→              className="gap-2"
+   282→   282→            >
+   283→   283→              Selanjutnya <ArrowRight className="h-4 w-4" />
+   284→   284→            </Button>
+   285→   285→          ) : (
+   286→   286→            <Button onClick={resetAll} variant="outline" className="gap-2">
+   287→   287→              <RefreshCw className="h-4 w-4" /> Mulai Baru
+   288→   288→            </Button>
+   289→   289→          )}
+   290→   290→        </div>
+   291→   291→      </main>
+   292→   292→
+   293→   293→      <Footer />
+   294→   294→    </div>
+   295→   295→  )
+   296→   296→}
+   297→   297→
+   298→   298→/* ---------------- Header ---------------- */
+   299→   299→function Header({ onReset, hasData }: { onReset: () => void; hasData: boolean }) {
+   300→   300→  return (
+   301→   301→    <header className="sticky top-0 z-40 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/75">
+   302→   302→      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+   303→   303→        <div className="flex items-center gap-3">
+   304→   304→          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-red-600 to-red-700 flex items-center justify-center text-white font-bold shadow-sm">
+   305→   305→            KS
+   306→   306→          </div>
+   307→   307→          <div>
+   308→   308→            <div className="font-semibold text-sm leading-tight">PKH Document Generator</div>
+   309→   309→            <div className="text-[11px] text-muted-foreground leading-tight">Kementerian Sosial Republik Indonesia</div>
+   310→   310→          </div>
+   311→   311→        </div>
+   312→   312→        <div className="flex items-center gap-2">
+   313→   313→          <Badge variant="secondary" className="hidden sm:inline-flex gap-1">
+   314→   314→            <ShieldCheck className="h-3 w-3" /> BSrE Ready
+   315→   315→          </Badge>
+   316→   316→          {hasData && (
+   317→   317→            <Button variant="ghost" size="sm" onClick={onReset} className="gap-1.5 text-xs">
+   318→   318→              <RefreshCw className="h-3.5 w-3.5" /> Reset
+   319→   319→            </Button>
+   320→   320→          )}
+   321→   321→        </div>
+   322→   322→      </div>
+   323→   323→    </header>
+   324→   324→  )
+   325→   325→}
+   326→   326→
+   327→   327→/* ---------------- Hero ---------------- */
+   328→   328→function Hero() {
+   329→   329→  return (
+   330→   330→    <div className="mb-8 text-center">
+   331→   331→      <motion.div
+   332→   332→        initial={{ opacity: 0, y: -10 }}
+   333→   333→        animate={{ opacity: 1, y: 0 }}
+   334→   334→        className="inline-flex items-center gap-2 rounded-full border bg-red-50 px-3 py-1 text-xs font-medium text-red-700 mb-4"
+   335→   335→      >
+   336→   336→        <Sparkles className="h-3 w-3" /> Sistem Otomasi Dokumen PKH
+   337→   337→      </motion.div>
+   338→   338→      <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 mb-3">
+   339→   339→        Generator Dokumen Program Keluarga Harapan
+   340→   340→      </h1>
+   341→   341→      <p className="text-muted-foreground max-w-2xl mx-auto text-sm sm:text-base">
+   342→   342→        Unggah file <strong>PDF/dokumen</strong> apa pun (PDF, TXT, JSON, CSV, DOCX, XLSX), sistem otomatis
+   343→   343→        mendeteksi jenis formulir (Pendidikan, Kesehatan, Kesejahteraan Sosial) dan <strong>mengambil data wilayah
+   344→   344→        langsung dari dokumen</strong> tanpa mengubah hasil, lalu menghasilkan <strong>1 tanda tangan digital & stempel BSrE</strong>,
+   345→   345→        7 variasi centang SVG bergaya tulisan tangan, dan mengekspor ke PDF.
+   346→   346→      </p>
+   347→   347→      <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs">
+   348→   348→        {[
+   349→   349→          { icon: FileText, label: 'PDF & All Doc Types' },
+   350→   350→          { icon: Database, label: 'Auto-detect Form Type' },
+   351→   351→          { icon: MapPin, label: 'Wilayah dari Dokumen' },
+   352→   352→          { icon: ClipboardCheck, label: '7 Variasi Centang SVG' },
+   353→   353→          { icon: PenTool, label: 'Tanda Tangan Cursive' },
+   354→   354→          { icon: Stamp, label: '1 Stempel BSrE' },
+   355→   355→          { icon: FileDown, label: 'PDF Export' },
+   356→   356→        ].map((f) => (
+   357→   357→          <span key={f.label} className="inline-flex items-center gap-1.5 rounded-md border bg-white px-2.5 py-1 text-slate-600">
+   358→   358→            <f.icon className="h-3 w-3 text-red-600" /> {f.label}
+   359→   359→          </span>
+   360→   360→        ))}
+   361→   361→      </div>
+   362→   362→    </div>
+   363→   363→  )
+   364→   364→}
+   365→   365→
+   366→   366→/* ---------------- Stepper ---------------- */
+   367→   367→function Stepper({ currentStep }: { currentStep: number }) {
+   368→   368→  return (
+   369→   369→    <div className="w-full overflow-x-auto pb-2">
+   370→   370→      <div className="flex items-center min-w-max gap-1">
+   371→   371→        {STEPS.map((s, i) => {
+   372→   372→          const isDone = i < currentStep
+   373→   373→          const isCurrent = i === currentStep
+   374→   374→          const Icon = s.icon
+   375→   375→          return (
+   376→   376→            <div key={s.id} className="flex items-center">
+   377→   377→              <div className="flex flex-col items-center gap-1.5 min-w-[90px]">
+   378→   378→                <div
+   379→   379→                  className={`h-9 w-9 rounded-full flex items-center justify-center border-2 transition-all ${
+   380→   380→                    isDone
+   381→   381→                      ? 'bg-green-600 border-green-600 text-white'
+   382→   382→                      : isCurrent
+   383→   383→                      ? 'bg-red-600 border-red-600 text-white shadow-md shadow-red-200'
+   384→   384→                      : 'bg-white border-slate-200 text-slate-400'
+   385→   385→                  }`}
+   386→   386→                >
+   387→   387→                  {isDone ? <CheckCircle2 className="h-5 w-5" /> : <Icon className="h-4 w-4" />}
+   388→   388→                </div>
+   389→   389→                <div className={`text-[11px] font-medium text-center ${isCurrent ? 'text-red-700' : isDone ? 'text-green-700' : 'text-slate-400'}`}>
+   390→   390→                  {s.name}
+   391→   391→                </div>
+   392→   392→              </div>
+   393→   393→              {i < STEPS.length - 1 && (
+   394→   394→                <div className={`h-0.5 w-8 sm:w-14 mx-1 ${i < currentStep ? 'bg-green-500' : 'bg-slate-200'}`} />
+   395→   395→              )}
+   396→   396→            </div>
+   397→   397→          )
+   398→   398→        })}
+   399→   399→      </div>
+   400→   400→    </div>
+   401→   401→  )
+   402→   402→}
+   403→   403→
+   404→   404→/* ---------------- Step 0: Upload ---------------- */
+   405→   405→function UploadStep({
+   406→   406→  onFile, onSample, loading,
+   407→   407→}: {
+   408→   408→  onFile: (f: File) => void
+   409→   409→  onSample: (t: FormType) => void
+   410→   410→  loading: boolean
+   411→   411→}) {
+   412→   412→  const [dragOver, setDragOver] = useState(false)
+   413→   413→  const inputRef = useRef<HTMLInputElement>(null)
+   414→   414→
+   415→   415→  return (
+   416→   416→    <div className="grid lg:grid-cols-2 gap-6">
+   417→   417→      {/* Upload zone */}
+   418→   418→      <Card className="border-2 border-dashed border-slate-200 hover:border-red-300 transition-colors">
+   419→   419→        <CardHeader>
+   420→   420→          <CardTitle className="flex items-center gap-2 text-base">
+   421→   421→            <Upload className="h-4 w-4 text-red-600" /> Unggah File Dokumen
+   422→   422→          </CardTitle>
+   423→   423→          <CardDescription>Dukungan PDF, TXT, JSON, CSV, DOCX, XLSX</CardDescription>
+   424→   424→        </CardHeader>
+   425→   425→        <CardContent>
+   426→   426→          <div
+   427→   427→            onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+   428→   428→            onDragLeave={() => setDragOver(false)}
+   429→   429→            onDrop={(e) => {
+   430→   430→              e.preventDefault(); setDragOver(false)
+   431→   431→              const f = e.dataTransfer.files?.[0]
+   432→   432→              if (f) onFile(f)
+   433→   433→            }}
+   434→   434→            onClick={() => inputRef.current?.click()}
+   435→   435→            className={`rounded-lg border-2 border-dashed p-10 text-center cursor-pointer transition-all ${
+   436→   436→              dragOver ? 'border-red-500 bg-red-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-50'
+   437→   437→            }`}
+   438→   438→          >
+   439→   439→            <input
+   440→   440→              ref={inputRef}
+   441→   441→              type="file"
+   442→   442→              accept=".pdf,.txt,.json,.csv,.docx,.xlsx"
+   443→   443→              className="hidden"
+   444→   444→              onChange={(e) => {
+   445→   445→                const f = e.target.files?.[0]
+   446→   446→                if (f) onFile(f)
+   447→   447→              }}
+   448→   448→            />
+   449→   449→            {loading ? (
+   450→   450→              <div className="flex flex-col items-center gap-2">
+   451→   451→                <Loader2 className="h-8 w-8 text-red-600 animate-spin" />
+   452→   452→                <p className="text-sm text-muted-foreground">Memproses dokumen...</p>
+   453→   453→                <p className="text-[11px] text-slate-400">Ekstraksi teks PDF mungkin membutuhkan beberapa detik</p>
+   454→   454→              </div>
+   455→   455→            ) : (
+   456→   456→              <>
+   457→   457→                <div className="mx-auto h-12 w-12 rounded-full bg-red-100 flex items-center justify-center mb-3">
+   458→   458→                  <FileText className="h-6 w-6 text-red-600" />
+   459→   459→                </div>
+   460→   460→                <p className="text-sm font-medium text-slate-700">Tarik & lepas file di sini</p>
+   461→   461→                <p className="text-xs text-muted-foreground mt-1">atau klik untuk memilih file</p>
+   462→   462→                <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+   463→   463→                  {['PDF', 'TXT', 'JSON', 'CSV', 'DOCX', 'XLSX'].map((fmt) => (
+   464→   464→                    <span key={fmt} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">.{fmt.toLowerCase()}</span>
+   465→   465→                  ))}
+   466→   466→                </div>
+   467→   467→              </>
+   468→   468→            )}
+   469→   469→          </div>
+   470→   470→        </CardContent>
+   471→   471→      </Card>
+   472→   472→
+   473→   473→      {/* Sample data */}
+   474→   474→      <Card>
+   475→   475→        <CardHeader>
+   476→   476→          <CardTitle className="flex items-center gap-2 text-base">
+   477→   477→            <Database className="h-4 w-4 text-red-600" /> Muat Data Contoh
+   478→   478→          </CardTitle>
+   479→   479→          <CardDescription>Coba langsung dengan data PKH contoh yang realistis</CardDescription>
+   480→   480→        </CardHeader>
+   481→   481→        <CardContent className="space-y-3">
+   482→   482→          <SampleButton
+   483→   483→            title="Formulir Pendidikan"
+   484→   484→            desc="Verifikasi komitmen pendidikan (Triwulan, ALPA/IZIN/SAKIT/JML/%)"
+   485→   485→            color="bg-blue-500"
+   486→   486→            loading={loading}
+   487→   487→            onClick={() => onSample('education')}
+   488→   488→          />
+   489→   489→          <SampleButton
+   490→   490→            title="Formulir Kesehatan"
+   491→   491→            desc="Verifikasi komitmen kesehatan (Posyandu, Triwulan)"
+   492→   492→            color="bg-emerald-500"
+   493→   493→            loading={loading}
+   494→   494→            onClick={() => onSample('health')}
+   495→   495→          />
+   496→   496→          <SampleButton
+   497→   497→            title="Formulir Kesejahteraan Sosial"
+   498→   498→            desc="Verifikasi komitmen kesejahteraan sosial (Triwulan)"
+   499→   499→            color="bg-amber-500"
+   500→   500→            loading={loading}
+   501→   501→            onClick={() => onSample('social')}
+   502→   502→          />
+   503→   503→          <Separator className="my-3" />
+   504→   504→          <Alert className="bg-slate-50 border-slate-200">
+   505→   505→            <AlertTriangle className="h-4 w-4 text-amber-500" />
+   506→   506→            <AlertDescription className="text-xs text-slate-600">
+   507→   507→              Sistem akan <strong>otomatis mendeteksi</strong> jenis formulir berdasarkan isi dokumen
+   508→   508→              dan <strong>mengambil data wilayah (kabupaten/kecamatan/desa) langsung dari file</strong> —
+   509→   509→              hasil tidak diubah. Kehadiran rata-rata di-random 90-100% bila tidak ada di dokumen.
+   510→   510→            </AlertDescription>
+   511→   511→          </Alert>
+   512→   512→        </CardContent>
+   513→   513→      </Card>
+   514→   514→    </div>
+   515→   515→  )
+   516→   516→}
+   517→   517→
+   518→   518→function SampleButton({
+   519→   519→  title, desc, color, loading, onClick,
+   520→   520→}: {
+   521→   521→  title: string; desc: string; color: string; loading: boolean; onClick: () => void
+   522→   522→}) {
+   523→   523→  return (
+   524→   524→    <button
+   525→   525→      onClick={onClick}
+   526→   526→      disabled={loading}
+   527→   527→      className="w-full text-left rounded-lg border p-3 hover:border-red-300 hover:bg-red-50/40 transition-colors disabled:opacity-50 group"
+   528→   528→    >
+   529→   529→      <div className="flex items-center gap-3">
+   530→   530→        <div className={`h-9 w-9 rounded-md ${color} flex items-center justify-center text-white text-xs font-bold shrink-0`}>
+   531→   531→          {title.charAt(0)}
+   532→   532→        </div>
+   533→   533→        <div className="flex-1 min-w-0">
+   534→   534→          <div className="text-sm font-medium text-slate-800 flex items-center gap-1">
+   535→   535→            {title}
+   536→   536→            <ChevronRight className="h-3.5 w-3.5 text-slate-400 group-hover:text-red-600 transition-colors ml-auto" />
+   537→   537→          </div>
+   538→   538→          <div className="text-xs text-muted-foreground mt-0.5">{desc}</div>
+   539→   539→        </div>
+   540→   540→      </div>
+   541→   541→    </button>
+   542→   542→  )
+   543→   543→}
+   544→   544→
+   545→   545→/* ---------------- Step 1: Review ---------------- */
+   546→   546→function ReviewStep({
+   547→   547→  data, onMeta, onMetaNumber, onType, onTriwulan, sourceFile, sourceType,
+   548→   548→}: {
+   549→   549→  data: PKHFormData
+   550→   550→  onMeta: (f: keyof PKHFormData, v: string) => void
+   551→   551→  onMetaNumber: (f: keyof PKHFormData, v: number) => void
+   552→   552→  onType: (t: FormType) => void
+   553→   553→  onTriwulan: (t: number) => void
+   554→   554→  sourceFile: string
+   555→   555→  sourceType: string
+   556→   556→}) {
+   557→   557→  const wilayahFields = [
+   558→   558→    { key: 'provinsi', label: 'Provinsi', value: data.provinsi },
+   559→   559→    { key: 'kabupaten', label: 'Kabupaten/Kota', value: data.kabupaten },
+   560→   560→    { key: 'kecamatan', label: 'Kecamatan', value: data.kecamatan },
+   561→   561→    { key: 'kelurahan', label: 'Kelurahan/Desa', value: data.kelurahan },
+   562→   562→  ] as const
+   563→   563→  const extractedCount = wilayahFields.filter((f) => f.value && f.value.trim().length > 0).length
+   564→   564→  const missingCount = wilayahFields.length - extractedCount
+   565→   565→
+   566→   566→  return (
+   567→   567→    <div className="space-y-5">
+   568→   568→      {/* Source file cross-check banner */}
+   569→   569→      {sourceFile && (
+   570→   570→        <Card className="border-blue-200 bg-blue-50/40">
+   571→   571→          <CardContent className="pt-4 pb-4">
+   572→   572→            <div className="flex items-start gap-3">
+   573→   573→              <div className="h-9 w-9 rounded-md bg-blue-100 flex items-center justify-center shrink-0">
+   574→   574→                <FileCheck2 className="h-5 w-5 text-blue-600" />
+   575→   575→              </div>
+   576→   576→              <div className="flex-1 min-w-0">
+   577→   577→                <div className="flex items-center gap-2 flex-wrap">
+   578→   578→                  <span className="text-sm font-semibold text-slate-800">Sumber Dokumen:</span>
+   579→   579→                  <code className="text-xs px-2 py-0.5 rounded bg-white border text-slate-700 truncate max-w-[280px]">{sourceFile}</code>
+   580→   580→                  {sourceType && (
+   581→   581→                    <Badge variant="secondary" className="text-[10px] uppercase">{sourceType}</Badge>
+   582→   582→                  )}
+   583→   583→                </div>
+   584→   584→                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+   585→   585→                  <span className="flex items-center gap-1.5 text-slate-600">
+   586→   586→                    <MapPin className="h-3.5 w-3.5 text-blue-500" />
+   587→   587→                    Wilayah diekstrak dari dokumen:
+   588→   588→                  </span>
+   589→   589→                  {wilayahFields.map((f) => (
+   590→   590→                    <span key={f.key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] ${
+   591→   591→                      f.value?.trim()
+   592→   592→                        ? 'bg-green-100 text-green-700'
+   593→   593→                        : 'bg-amber-100 text-amber-700'
+   594→   594→                    }`}>
+   595→   595→                      {f.value?.trim() ? (
+   596→   596→                        <CheckCircle2 className="h-3 w-3" />
+   597→   597→                      ) : (
+   598→   598→                        <AlertTriangle className="h-3 w-3" />
+   599→   599→                      )}
+   600→   600→                      {f.label}: {f.value?.trim() || 'kosong'}
+   601→   601→                    </span>
+   602→   602→                  ))}
+   603→   603→                </div>
+   604→   604→                {missingCount > 0 && (
+   605→   605→                  <p className="mt-2 text-[11px] text-amber-700">
+   606→   606→                    {missingCount} field wilayah tidak ditemukan di dokumen — silakan lengkapi manual di bawah.
+   607→   607→                    Data hasil tidak akan diubah oleh sistem.
+   608→   608→                  </p>
+   609→   609→                )}
+   610→   610→              </div>
+   611→   611→            </div>
+   612→   612→          </CardContent>
+   613→   613→        </Card>
+   614→   614→      )}
+   615→   615→
+   616→   616→      <Card>
+   617→   617→        <CardHeader>
+   618→   618→          <CardTitle className="flex items-center gap-2 text-base">
+   619→   619→            <Table2 className="h-4 w-4 text-red-600" /> Konfigurasi & Metadata Formulir
+   620→   620→          </CardTitle>
+   621→   621→          <CardDescription>
+   622→   622→            Verifikasi jenis formulir, triwulan, dan lengkapi metadata sesuai dokumen sumber
+   623→   623→          </CardDescription>
+   624→   624→        </CardHeader>
+   625→   625→        <CardContent>
+   626→   626→          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   627→   627→            <div className="space-y-1.5">
+   628→   628→              <Label className="text-xs">Jenis Formulir</Label>
+   629→   629→              <Select value={data.formType} onValueChange={(v) => onType(v as FormType)}>
+   630→   630→                <SelectTrigger><SelectValue /></SelectTrigger>
+   631→   631→                <SelectContent>
+   632→   632→                  <SelectItem value="education">Pendidikan</SelectItem>
+   633→   633→                  <SelectItem value="health">Kesehatan</SelectItem>
+   634→   634→                  <SelectItem value="social">Kesejahteraan Sosial</SelectItem>
+   635→   635→                </SelectContent>
+   636→   636→              </Select>
+   637→   637→            </div>
+   638→   638→            <div className="space-y-1.5">
+   639→   639→              <Label className="text-xs">Triwulan</Label>
+   640→   640→              <Select value={String(data.triwulan || 2)} onValueChange={(v) => onTriwulan(parseInt(v, 10))}>
+   641→   641→                <SelectTrigger><SelectValue /></SelectTrigger>
+   642→   642→                <SelectContent>
+   643→   643→                  <SelectItem value="1">Triwulan 1 (Jan-Mar)</SelectItem>
+   644→   644→                  <SelectItem value="2">Triwulan 2 (Apr-Jun)</SelectItem>
+   645→   645→                  <SelectItem value="3">Triwulan 3 (Jul-Sep)</SelectItem>
+   646→   646→                  <SelectItem value="4">Triwulan 4 (Okt-Des)</SelectItem>
+   647→   647→                </SelectContent>
+   648→   648→              </Select>
+   649→   649→            </div>
+   650→   650→            <Field label="Periode" value={data.periode} onChange={(v) => onMeta('periode', v)} />
+   651→   651→            <Field label="Provinsi" value={data.provinsi} onChange={(v) => onMeta('provinsi', v)} />
+   652→   652→            <Field label="Kabupaten/Kota" value={data.kabupaten} onChange={(v) => onMeta('kabupaten', v)} />
+   653→   653→            <Field label="Kecamatan" value={data.kecamatan} onChange={(v) => onMeta('kecamatan', v)} />
+   654→   654→            <Field label="Kelurahan/Desa" value={data.kelurahan} onChange={(v) => onMeta('kelurahan', v)} />
+   655→   655→            <Field label="NPSN / Kode Wilayah" value={data.npsn || ''} onChange={(v) => onMeta('npsn', v)} />
+   656→   656→            <Field
+   657→   657→              label={data.formType === 'education' ? 'Nama Sekolah' : data.formType === 'health' ? 'Nama Posyandu' : 'Wilayah Layanan'}
+   658→   658→              value={data.namaSekolah || ''}
+   659→   659→              onChange={(v) => onMeta('namaSekolah', v)}
+   660→   660→            />
+   661→   661→            <Field label="Alamat Sekolah/Layanan" value={data.alamatSekolah || ''} onChange={(v) => onMeta('alamatSekolah', v)} />
+   662→   662→          </div>
+   663→   663→
+   664→   664→          <Separator className="my-4" />
+   665→   665→
+   666→   666→          <div className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+   667→   667→            <PenTool className="h-3.5 w-3.5 text-red-600" /> Penandatangan (1 tanda tangan & stempel BSrE)
+   668→   668→          </div>
+   669→   669→          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   670→   670→            <div className="space-y-1.5">
+   671→   671→              <Label className="text-xs">Jabatan Penandatangan</Label>
+   672→   672→              <Select value={data.signerRole} onValueChange={(v) => onMeta('signerRole', v)}>
+   673→   673→                <SelectTrigger><SelectValue /></SelectTrigger>
+   674→   674→                <SelectContent>
+   675→   675→                  <SelectItem value="Kepala Sekolah">Kepala Sekolah</SelectItem>
+   676→   676→                  <SelectItem value="Kepala Desa">Kepala Desa</SelectItem>
+   677→   677→                  <SelectItem value="Kepala Lurah">Kepala Lurah</SelectItem>
+   678→   678→                  <SelectItem value="Koordinator PKH">Koordinator PKH</SelectItem>
+   679→   679→                  <SelectItem value="Pendamping PKH">Pendamping PKH</SelectItem>
+   680→   680→                </SelectContent>
+   681→   681→              </Select>
+   682→   682→            </div>
+   683→   683→            <Field label="Nama Penandatangan" value={data.signerName} onChange={(v) => onMeta('signerName', v)} />
+   684→   684→            <Field label="NIP Penandatangan" value={data.signerNIP} onChange={(v) => onMeta('signerNIP', v)} />
+   685→   685→          </div>
+   686→   686→        </CardContent>
+   687→   687→      </Card>
+   688→   688→
+   689→   689→      <Card>
+   690→   690→        <CardHeader>
+   691→   691→          <div className="flex items-center justify-between flex-wrap gap-2">
+   692→   692→            <div>
+   693→   693→              <CardTitle className="flex items-center gap-2 text-base">
+   694→   694→                <Database className="h-4 w-4 text-red-600" /> Data Peserta
+   695→   695→              </CardTitle>
+   696→   696→              <CardDescription>{data.records.length} catatan terdeteksi • Triwulan {data.triwulan} ({data.months.join(', ')})</CardDescription>
+   697→   697→            </div>
+   698→   698→            <Badge variant="outline" className="gap-1">
+   699→   699→              <Layers className="h-3 w-3" /> {FORM_TYPE_LABELS[data.formType]}
+   700→   700→            </Badge>
+   701→   701→          </div>
+   702→   702→        </CardHeader>
+   703→   703→        <CardContent>
+   704→   704→          <ScrollArea className="h-[420px] rounded-md border">
+   705→   705→            <RecordsTable data={data} />
+   706→   706→          </ScrollArea>
+   707→   707→        </CardContent>
+   708→   708→      </Card>
+   709→   709→    </div>
+   710→   710→  )
+   711→   711→}
+   712→   712→
+   713→   713→function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+   714→   714→  return (
+   715→   715→    <div className="space-y-1.5">
+   716→   716→      <Label className="text-xs">{label}</Label>
+   717→   717→      <Input value={value} onChange={(e) => onChange(e.target.value)} className="text-sm" />
+   718→   718→    </div>
+   719→   719→  )
+   720→   720→}
+   721→   721→
+   722→   722→function RecordsTable({ data }: { data: PKHFormData }) {
+   723→   723→  const isEdu = data.formType === 'education'
+   724→   724→  const isHealth = data.formType === 'health'
+   725→   725→
+   726→   726→  return (
+   727→   727→    <table className="w-full text-xs">
+   728→   728→      <thead className="sticky top-0 bg-slate-50 z-10">
+   729→   729→        <tr className="text-left border-b">
+   730→   730→          <th className="p-2 font-semibold">No</th>
+   731→   731→          <th className="p-2 font-semibold">Nama</th>
+   732→   732→          <th className="p-2 font-semibold">NIK</th>
+   733→   733→          {isEdu && <th className="p-2 font-semibold">NIK Pengurus</th>}
+   734→   734→          {isEdu && <th className="p-2 font-semibold">NISN</th>}
+   735→   735→          {isEdu && <th className="p-2 font-semibold">Tingkat</th>}
+   736→   736→          {isHealth && <th className="p-2 font-semibold">Posyandu</th>}
+   737→   737→          {!isEdu && !isHealth && <th className="p-2 font-semibold">Bantuan</th>}
+   738→   738→          {data.months.map((m) => (
+   739→   739→            <th key={m} className="p-2 font-semibold text-center" colSpan={2}>{m.slice(0, 3)}</th>
+   740→   740→          ))}
+   741→   741→          <th className="p-2 font-semibold text-center">Avg %</th>
+   742→   742→        </tr>
+   743→   743→        <tr className="text-left border-b bg-slate-100">
+   744→   744→          <th className="p-1" colSpan={isEdu ? 6 : (isHealth ? 4 : 4)}></th>
+   745→   745→          {data.months.map((m) => (
+   746→   746→            <th key={m} className="p-1 text-center text-[9px] font-normal" colSpan={2}>JML / %</th>
+   747→   747→          ))}
+   748→   748→          <th className="p-1"></th>
+   749→   749→        </tr>
+   750→   750→      </thead>
+   751→   751→      <tbody>
+   752→   752→        {data.records.map((r, i) => {
+   753→   753→          const avgPct = r.bulan.length
+   754→   754→            ? Math.round(r.bulan.reduce((s, m) => s + m.percent, 0) / r.bulan.length)
+   755→   755→            : 0
+   756→   756→          return (
+   757→   757→            <tr key={i} className="border-b hover:bg-slate-50">
+   758→   758→              <td className="p-2 text-muted-foreground">{i + 1}</td>
+   759→   759→              <td className="p-2 font-medium">{r.nama}</td>
+   760→   760→              <td className="p-2 text-muted-foreground font-mono text-[10px]">{r.nik}</td>
+   761→   761→              {isEdu && <td className="p-2 text-muted-foreground font-mono text-[10px]">{r.nikPengurus || '-'}</td>}
+   762→   762→              {isEdu && <td className="p-2 text-muted-foreground font-mono text-[10px]">{r.nisn || '-'}</td>}
+   763→   763→              {isEdu && <td className="p-2">{r.bentukPendidikan} {r.tingkat}</td>}
+   764→   764→              {isHealth && <td className="p-2 text-muted-foreground">{r.posyandu || '-'}</td>}
+   765→   765→              {!isEdu && !isHealth && <td className="p-2 text-muted-foreground">{r.jenisBantuan || '-'}</td>}
+   766→   766→              {r.bulan.map((m, j) => (
+   767→   767→                <td key={j} className="p-2 text-center">
+   768→   768→                  <div className="font-mono text-[10px]">{m.jml}/{m.hariEfektif}</div>
+   769→   769→                  <div className={`text-[10px] font-semibold ${m.percent >= 75 ? 'text-green-600' : 'text-amber-600'}`}>{m.percent}%</div>
+   770→   770→                </td>
+   771→   771→              ))}
+   772→   772→              <td className="p-2 text-center">
+   773→   773→                <span className={`font-semibold ${avgPct >= 75 ? 'text-green-600' : avgPct >= 50 ? 'text-amber-600' : 'text-red-600'}`}>{avgPct}%</span>
+   774→   774→              </td>
+   775→   775→            </tr>
+   776→   776→          )
+   777→   777→        })}
+   778→   778→      </tbody>
+   779→   779→    </table>
+   780→   780→  )
+   781→   781→}
+   782→   782→
+   783→   783→/* ---------------- Step 2: Generate ---------------- */
+   784→   784→function GenerateStep({
+   785→   785→  data, html, loading, onGenerate, previewTab, setPreviewTab,
+   786→   786→}: {
+   787→   787→  data: PKHFormData
+   788→   788→  html: string
+   789→   789→  loading: boolean
+   790→   790→  onGenerate: () => void
+   791→   791→  previewTab: 'form' | 'source'
+   792→   792→  setPreviewTab: (t: 'form' | 'source') => void
+   793→   793→}) {
+   794→   794→  return (
+   795→   795→    <div className="space-y-4">
+   796→   796→      <Card>
+   797→   797→        <CardHeader>
+   798→   798→          <div className="flex items-center justify-between flex-wrap gap-3">
+   799→   799→            <div>
+   800→   800→              <CardTitle className="flex items-center gap-2 text-base">
+   801→   801→                <FileText className="h-4 w-4 text-red-600" /> Hasilkan Formulir HTML
+   802→   802→              </CardTitle>
+   803→   803→              <CardDescription>Generate dokumen lengkap dengan 7 variasi centang SVG, 1 tanda tangan & stempel BSrE</CardDescription>
+   804→   804→            </div>
+   805→   805→            <Button onClick={onGenerate} disabled={loading} className="gap-2">
+   806→   806→              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+   807→   807→              {html ? 'Regenerate' : 'Hasilkan Formulir'}
+   808→   808→            </Button>
+   809→   809→          </div>
+   810→   810→        </CardHeader>
+   811→   811→        <CardContent>
+   812→   812→          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+   813→   813→            <StatCard icon={Database} label="Total Catatan" value={String(data.records.length)} />
+   814→   814→            <StatCard icon={Layers} label="Jenis Formulir" value={FORM_TYPE_LABELS[data.formType]} />
+   815→   815→            <StatCard icon={Stamp} label="Stempel BSrE" value="1 (Aktif)" />
+   816→   816→            <StatCard icon={PenTool} label="Tanda Tangan" value="1 Blok" />
+   817→   817→          </div>
+   818→   818→          {!html && !loading && (
+   819→   819→            <Alert className="bg-blue-50 border-blue-200">
+   820→   820→              <Sparkles className="h-4 w-4 text-blue-500" />
+   821→   821→              <AlertDescription className="text-sm text-blue-800">
+   822→   822→                Klik <strong>"Hasilkan Formulir"</strong> untuk membuat dokumen HTML yang siap dicetak
+   823→   823→                dengan 7 variasi centang SVG bergaya tulisan tangan natural.
+   824→   824→              </AlertDescription>
+   825→   825→            </Alert>
+   826→   826→          )}
+   827→   827→        </CardContent>
+   828→   828→      </Card>
+   829→   829→
+   830→   830→      {html && (
+   831→   831→        <Card>
+   832→   832→          <CardHeader className="pb-3">
+   833→   833→            <div className="flex items-center justify-between">
+   834→   834→              <CardTitle className="text-base flex items-center gap-2">
+   835→   835→                <Eye className="h-4 w-4 text-red-600" /> Pratinjau Dokumen
+   836→   836→              </CardTitle>
+   837→   837→              <Tabs value={previewTab} onValueChange={(v) => setPreviewTab(v as 'form' | 'source')}>
+   838→   838→                <TabsList className="h-8">
+   839→   839→                  <TabsTrigger value="form" className="text-xs px-3">Rendered</TabsTrigger>
+   840→   840→                  <TabsTrigger value="source" className="text-xs px-3">HTML Source</TabsTrigger>
+   841→   841→                </TabsList>
+   842→   842→              </Tabs>
+   843→   843→            </div>
+   844→   844→          </CardHeader>
+   845→   845→          <CardContent>
+   846→   846→            <Tabs value={previewTab}>
+   847→   847→              <TabsContent value="form" className="mt-0">
+   848→   848→                <div className="rounded-md border bg-slate-100 overflow-hidden">
+   849→   849→                  <iframe
+   850→   850→                    title="Form Preview"
+   851→   851→                    srcDoc={html}
+   852→   852→                    className="w-full h-[640px] bg-white"
+   853→   853→                  />
+   854→   854→                </div>
+   855→   855→              </TabsContent>
+   856→   856→              <TabsContent value="source" className="mt-0">
+   857→   857→                <ScrollArea className="h-[640px] rounded-md border bg-slate-950">
+   858→   858→                  <pre className="p-4 text-[11px] text-slate-300 font-mono whitespace-pre-wrap break-all">{html}</pre>
+   859→   859→                </ScrollArea>
+   860→   860→              </TabsContent>
+   861→   861→            </Tabs>
+   862→   862→          </CardContent>
+   863→   863→        </Card>
+   864→   864→      )}
+   865→   865→    </div>
+   866→   866→  )
+   867→   867→}
+   868→   868→
+   869→   869→function StatCard({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+   870→   870→  return (
+   871→   871→    <div className="rounded-lg border bg-white p-3">
+   872→   872→      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-1">
+   873→   873→        <Icon className="h-3 w-3" /> {label}
+   874→   874→      </div>
+   875→   875→      <div className="text-sm font-semibold text-slate-800">{value}</div>
+   876→   876→    </div>
+   877→   877→  )
+   878→   878→}
+   879→   879→
+   880→   880→/* ---------------- Step 3: Export ---------------- */
+   881→   881→function ExportStep({
+   882→   882→  formData, hasHTML, loading, onExport,
+   883→   883→}: {
+   884→   884→  formData: PKHFormData
+   885→   885→  hasHTML: boolean
+   886→   886→  loading: boolean
+   887→   887→  onExport: () => void
+   888→   888→}) {
+   889→   889→  return (
+   890→   890→    <div className="space-y-4">
+   891→   891→      <Card>
+   892→   892→        <CardHeader>
+   893→   893→          <CardTitle className="flex items-center gap-2 text-base">
+   894→   894→            <FileDown className="h-4 w-4 text-red-600" /> Ekspor Dokumen PDF
+   895→   895→          </CardTitle>
+   896→   896→          <CardDescription>Konversi formulir HTML menjadi PDF siap cetak (A4 Landscape)</CardDescription>
+   897→   897→        </CardHeader>
+   898→   898→        <CardContent>
+   899→   899→          <div className="grid sm:grid-cols-2 gap-4">
+   900→   900→            <div className="rounded-lg border p-4 bg-gradient-to-br from-slate-50 to-white">
+   901→   901→              <div className="flex items-center gap-2 mb-3">
+   902→   902→                <FileText className="h-5 w-5 text-red-600" />
+   903→   903→                <span className="font-medium text-sm">Dokumen Formulir</span>
+   904→   904→              </div>
+   905→   905→              <div className="space-y-1.5 text-xs text-slate-600">
+   906→   906→                <div className="flex justify-between"><span>Jenis</span><span className="font-medium">{FORM_TYPE_LABELS[formData.formType]}</span></div>
+   907→   907→                <div className="flex justify-between"><span>Periode</span><span className="font-medium">{formData.periode}</span></div>
+   908→   908→                <div className="flex justify-between"><span>Jumlah Peserta</span><span className="font-medium">{formData.records.length}</span></div>
+   909→   909→                <div className="flex justify-between"><span>Stempel BSrE</span><span className="font-medium text-green-600">1 (Terverifikasi)</span></div>
+   910→   910→                <div className="flex justify-between"><span>Tanda Tangan</span><span className="font-medium">1 blok digital</span></div>
+   911→   911→                <div className="flex justify-between"><span>Centang SVG</span><span className="font-medium">7 variasi</span></div>
+   912→   912→                <div className="flex justify-between"><span>Format Output</span><span className="font-medium">PDF (A4 Landscape)</span></div>
+   913→   913→              </div>
+   914→   914→            </div>
+   915→   915→
+   916→   916→            <div className="rounded-lg border p-4 bg-gradient-to-br from-red-50/50 to-white">
+   917→   917→              <div className="flex items-center gap-2 mb-3">
+   918→   918→                <ShieldCheck className="h-5 w-5 text-green-600" />
+   919→   919→                <span className="font-medium text-sm">Status Verifikasi</span>
+   920→   920→              </div>
+   921→   921→              <div className="space-y-2">
+   922→   922→                <CheckRow label="7 variasi centang SVG" done />
+   923→   923→                <CheckRow label="Kalkulasi ALPA/IZIN/SAKIT/JML/%" done />
+   924→   924→                <CheckRow label="1 stempel BSrE" done />
+   925→   925→                <CheckRow label="1 tanda tangan digital cursive" done />
+   926→   926→                <CheckRow label="Data wilayah dari dokumen" done />
+   927→   927→              </div>
+   928→   928→            </div>
+   929→   929→          </div>
+   930→   930→
+   931→   931→          <Separator className="my-4" />
+   932→   932→
+   933→   933→          {!hasHTML && (
+   934→   934→            <Alert className="bg-amber-50 border-amber-200 mb-3">
+   935→   935→              <AlertTriangle className="h-4 w-4 text-amber-500" />
+   936→   936→              <AlertDescription className="text-sm text-amber-800">
+   937→   937→                Formulir HTML belum dihasilkan. Kembali ke langkah 3 untuk generate formulir terlebih dahulu,
+   938→   938→                atau ekspor PDF akan otomatis generate dari data saat ini.
+   939→   939→              </AlertDescription>
+   940→   940→            </Alert>
+   941→   941→          )}
+   942→   942→
+   943→   943→          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+   944→   944→            <div className="text-sm text-muted-foreground">
+   945→   945→              {hasHTML
+   946→   946→                ? 'Formulir siap diekspor. Klik tombol di kanan untuk mengunduh PDF.'
+   947→   947→                : 'Klik tombol di kanan untuk generate + ekspor sekaligus.'}
+   948→   948→            </div>
+   949→   949→            <Button size="lg" onClick={onExport} disabled={loading} className="gap-2 bg-red-600 hover:bg-red-700">
+   950→   950→              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileDown className="h-5 w-5" />}
+   951→   951→              {loading ? 'Mengonversi...' : 'Unduh PDF'}
+   952→   952→            </Button>
+   953→   953→          </div>
+   954→   954→        </CardContent>
+   955→   955→      </Card>
+   956→   956→    </div>
+   957→   957→  )
+   958→   958→}
+   959→   959→
+   960→   960→function CheckRow({ label, done }: { label: string; done: boolean }) {
+   961→   961→  return (
+   962→   962→    <div className="flex items-center gap-2 text-xs">
+   963→   963→      {done ? (
+   964→   964→        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+   965→   965→      ) : (
+   966→   966→        <Loader2 className="h-3.5 w-3.5 text-amber-400" />
+   967→   967→      )}
+   968→   968→      <span className={done ? 'text-slate-700' : 'text-amber-700'}>{label}</span>
+   969→   969→    </div>
+   970→   970→  )
+   971→   971→}
+   972→   972→
+   973→   973→/* ---------------- Footer ---------------- */
+   974→   974→function Footer() {
+   975→   975→  return (
+   976→   976→    <footer className="mt-auto border-t bg-white">
+   977→   977→      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
+   978→   978→        <div className="flex items-center gap-2">
+   979→   979→          <ShieldCheck className="h-3.5 w-3.5 text-red-600" />
+   980→   980→          <span>PKH Document Generator &middot; Kementerian Sosial RI</span>
+   981→   981→        </div>
+   982→   982→        <div className="flex items-center gap-3">
+   983→   983→          <span>BSrE Certified</span>
+   984→   984→          <span>&middot;</span>
+   985→   985→          <span>Form Verifikasi Komitmen</span>
+   986→   986→          <span>&middot;</span>
+   987→   987→          <span>{new Date().getFullYear()}</span>
+   988→   988→        </div>
+   989→   989→      </div>
+   990→   990→    </footer>
+   991→   991→  )
+   992→   992→}
+   993→   993→

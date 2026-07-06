@@ -1,0 +1,602 @@
+     1→     1→// PKH HTML Form Generator
+     2→     2→// Generates print-ready HTML forms matching the official
+     3→     3→// "FORM VERIFIKASI KOMITMEN" PDF template (quarterly / triwulan format)
+     4→     4→import {
+     5→     5→  FormType,
+     6→     6→  PKHFormData,
+     7→     7→  PKHRecord,
+     8→     8→  MonthAttendance,
+     9→     9→  FORM_TYPE_TITLES,
+    10→    10→  FORM_TYPE_SUBTITLES,
+    11→    11→  FORM_TYPE_LABELS,
+    12→    12→} from './types'
+    13→    13→
+    14→    14→/* ============================================================
+    15→    15→   7 SVG checkmark variations — natural handwritten look
+    16→    16→   Each has different rotation, stroke width, opacity, and path
+    17→    17→   ============================================================ */
+    18→    18→const CHECKMARK_VARIANTS = [
+    19→    19→  // Variant 1: clean, slight right tilt
+    20→    20→  {
+    21→    21→    rotate: 4,
+    22→    22→    stroke: 2.6,
+    23→    23→    opacity: 0.95,
+    24→    24→    path: 'M7 12.5L10.5 16L17 9',
+    25→    25→    rx: '11',
+    26→    26→    fill: '#16a34a',
+    27→    27→  },
+    28→    28→  // Variant 2: left tilt, thinner
+    29→    29→  {
+    30→    30→    rotate: -6,
+    31→    31→    stroke: 2.2,
+    32→    32→    opacity: 0.88,
+    33→    33→    path: 'M6.5 13L10 16.5L17.5 8.5',
+    34→    34→    rx: '11',
+    35→    35→    fill: '#15803d',
+    36→    36→  },
+    37→    37→  // Variant 3: bold, upright
+    38→    38→  {
+    39→    39→    rotate: 1,
+    40→    40→    stroke: 3.0,
+    41→    41→    opacity: 0.92,
+    42→    42→    path: 'M7 12L10.5 15.5L17 8.5',
+    43→    43→    rx: '10',
+    44→    44→    fill: '#16a34a',
+    45→    45→  },
+    46→    46→  // Variant 4: heavy left tilt, thicker
+    47→    47→  {
+    48→    48→    rotate: -10,
+    49→    49→    stroke: 2.8,
+    50→    50→    opacity: 0.85,
+    51→    51→    path: 'M6 13.5L10 17L18 9',
+    52→    52→    rx: '12',
+    53→    53→    fill: '#166534',
+    54→    54→  },
+    55→    55→  // Variant 5: right tilt, medium
+    56→    56→  {
+    57→    57→    rotate: 8,
+    58→    58→    stroke: 2.4,
+    59→    59→    opacity: 0.9,
+    60→    60→    path: 'M7 12.5L10 16L17 8',
+    61→    61→    rx: '11',
+    62→    62→    fill: '#15803d',
+    63→    63→  },
+    64→    64→  // Variant 6: slight left, thin & light
+    65→    65→  {
+    66→    66→    rotate: -3,
+    67→    67→    stroke: 2.0,
+    68→    68→    opacity: 0.82,
+    69→    69→    path: 'M7 13L10.5 16.5L17.5 9',
+    70→    70→    rx: '11',
+    71→    71→    fill: '#16a34a',
+    72→    72→  },
+    73→    73→  // Variant 7: right tilt, very bold
+    74→    74→  {
+    75→    75→    rotate: 6,
+    76→    76→    stroke: 3.2,
+    77→    77→    opacity: 0.96,
+    78→    78→    path: 'M6.5 12L10 15.5L18 8',
+    79→    79→    rx: '10',
+    80→    80→    fill: '#166534',
+    81→    81→  },
+    82→    82→]
+    83→    83→
+    84→    84→// Render a checkmark SVG using a specific variant (index 0-6)
+    85→    85→function checkSVG(variantIdx = 0): string {
+    86→    86→  const v = CHECKMARK_VARIANTS[variantIdx % CHECKMARK_VARIANTS.length]
+    87→    87→  return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;transform:rotate(${v.rotate}deg);opacity:${v.opacity};"><circle cx="12" cy="12" r="${v.rx}" fill="${v.fill}"/><path d="${v.path}" stroke="#fff" stroke-width="${v.stroke}" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+    88→    88→}
+    89→    89→
+    90→    90→// Pick a deterministic-but-varied checkmark variant for a cell
+    91→    91→// so each cell in a row uses a different style (natural handwriting)
+    92→    92→function checkForCell(rowIdx: number, monthIdx: number, present: boolean): string {
+    93→    93→  if (!present) return `<span style="display:inline-block;width:15px;color:#94a3b8;font-size:13px;">—</span>`
+    94→    94→  const variant = (rowIdx * 3 + monthIdx) % 7
+    95→    95→  return `<span class="check-mark">${checkSVG(variant)}</span>`
+    96→    96→}
+    97→    97→
+    98→    98→/* ============================================================
+    99→    99→   BSrE (Badan Siber dan Sandi Negara) digital stamp
+   100→   100→   Circular red seal with QR simulation
+   101→   101→   ============================================================ */
+   102→   102→function bsreStampSVG(): string {
+   103→   103→  return `
+   104→   104→  <div class="bsre-stamp" aria-label="BSrE Digital Signature Stamp">
+   105→   105→    <svg width="115" height="115" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+   106→   106→      <defs>
+   107→   107→        <path id="circleTop" d="M 60,60 m -42,0 a 42,42 0 1,1 84,0" fill="none" />
+   108→   108→        <path id="circleBottom" d="M 60,60 m -42,0 a 42,42 0 1,0 84,0" fill="none" />
+   109→   109→      </defs>
+   110→   110→      <circle cx="60" cy="60" r="55" fill="none" stroke="#b91c1c" stroke-width="2" opacity="0.85"/>
+   111→   111→      <circle cx="60" cy="60" r="48" fill="none" stroke="#b91c1c" stroke-width="1" opacity="0.7"/>
+   112→   112→      <circle cx="60" cy="60" r="42" fill="none" stroke="#b91c1c" stroke-width="1" opacity="0.5" stroke-dasharray="2 2"/>
+   113→   113→      <text font-family="Arial, sans-serif" font-size="7" fill="#b91c1c" font-weight="bold" letter-spacing="0.8">
+   114→   114→        <textPath href="#circleTop" startOffset="50%" text-anchor="middle">BADAN SIBER DAN SANDI NEGARA</textPath>
+   115→   115→      </text>
+   116→   116→      <text font-family="Arial, sans-serif" font-size="6" fill="#b91c1c" letter-spacing="0.5">
+   117→   117→        <textPath href="#circleBottom" startOffset="50%" text-anchor="middle">SERTIFIKAT ELEKTRONIK TERVERIFIKASI</textPath>
+   118→   118→      </text>
+   119→   119→      <g transform="translate(60,60)">
+   120→   120→        <circle r="20" fill="#b91c1c" opacity="0.08"/>
+   121→   121→        <text x="0" y="-2" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#b91c1c" font-weight="bold">BSrE</text>
+   122→   122→        <text x="0" y="8" text-anchor="middle" font-family="Arial, sans-serif" font-size="4.5" fill="#b91c1c">TERSERTIFIKASI</text>
+   123→   123→        <line x1="-14" y1="13" x2="14" y2="13" stroke="#b91c1c" stroke-width="0.5"/>
+   124→   124→        <text x="0" y="18" text-anchor="middle" font-family="Arial, sans-serif" font-size="3.5" fill="#b91c1c">e-SIGN VERIFIED</text>
+   125→   125→      </g>
+   126→   126→    </svg>
+   127→   127→  </div>`
+   128→   128→}
+   129→   129→
+   130→   130→/* ============================================================
+   131→   131→   Handwritten signature using Dancing Script cursive font
+   132→   132→   ============================================================ */
+   133→   133→function signatureSVG(name: string): string {
+   134→   134→  // Generate a cursive-style signature path that varies by name length
+   135→   135→  const len = Math.min(name.length, 20)
+   136→   136→  const w = 150 + len * 2
+   137→   137→  return `
+   138→   138→  <svg width="${w}" height="55" viewBox="0 0 ${w} 55" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(-2deg);">
+   139→   139→    <path d="M 10 38 Q ${20 + len} 8, ${35 + len} 32 T ${60 + len} 28 Q ${75 + len} 14, ${90 + len} 32 Q ${105 + len} 44, ${120 + len} 22 T ${w - 15} 30"
+   140→   140→      fill="none" stroke="#1e3a5f" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.88"/>
+   141→   141→    <path d="M 18 42 L ${w - 22} 42" stroke="#1e3a5f" stroke-width="0.7" opacity="0.5"/>
+   142→   142→    <circle cx="${w - 8}" cy="32" r="2" fill="#1e3a5f" opacity="0.7"/>
+   143→   143→  </svg>`
+   144→   144→}
+   145→   145→
+   146→   146→// Single signature block (matches uploaded PDF — only 1 signer)
+   147→   147→function signatureBlock(name: string, nip: string, role: string): string {
+   148→   148→  return `
+   149→   149→  <div class="signature-block">
+   150→   150→    <div class="sig-stamp-overlay">${bsreStampSVG()}</div>
+   151→   151→    <div class="sig-name-svg">${signatureSVG(name)}</div>
+   152→   152→    <div class="sig-line"></div>
+   153→   153→    <div class="sig-name"><strong>${name}</strong></div>
+   154→   154→    <div class="sig-nip">NIP. ${nip}</div>
+   155→   155→    <div class="sig-role">${role}</div>
+   156→   156→  </div>`
+   157→   157→}
+   158→   158→
+   159→   159→/* ============================================================
+   160→   160→   Kementerian Sosial emblem
+   161→   161→   ============================================================ */
+   162→   162→function kemsosLogo(): string {
+   163→   163→  return `
+   164→   164→  <svg width="64" height="74" viewBox="0 0 70 80" xmlns="http://www.w3.org/2000/svg" aria-label="Logo Kementerian Sosial">
+   165→   165→    <path d="M35 2 L65 12 V40 C65 58 52 72 35 78 C18 72 5 58 5 40 V12 Z" fill="#dc2626" stroke="#991b1b" stroke-width="1.5"/>
+   166→   166→    <path d="M35 8 L59 16 V40 C59 54 49 66 35 71 C21 66 11 54 11 40 V16 Z" fill="#fef2f2" stroke="#dc2626" stroke-width="0.8"/>
+   167→   167→    <text x="35" y="30" text-anchor="middle" font-family="Arial" font-size="9" font-weight="bold" fill="#dc2626">KEMEN</text>
+   168→   168→    <text x="35" y="40" text-anchor="middle" font-family="Arial" font-size="9" font-weight="bold" fill="#dc2626">SOS</text>
+   169→   169→    <path d="M35 44 L40 50 L35 56 L30 50 Z" fill="#dc2626"/>
+   170→   170→    <text x="35" y="66" text-anchor="middle" font-family="Arial" font-size="4" fill="#dc2626">PKH</text>
+   171→   171→  </svg>`
+   172→   172→}
+   173→   173→
+   174→   174→/* ============================================================
+   175→   175→   Shared CSS for all forms — A4 landscape, print-ready
+   176→   176→   ============================================================ */
+   177→   177→function formCSS(): string {
+   178→   178→  return `
+   179→   179→  <style>
+   180→   180→    @import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600;700&display=swap');
+   181→   181→    @page { size: A4 landscape; margin: 12mm; }
+   182→   182→    * { box-sizing: border-box; }
+   183→   183→    body { font-family: 'Times New Roman', Arial, sans-serif; color: #1a1a1a; margin: 0; padding: 0; font-size: 10px; background: #fff; }
+   184→   184→    .page { width: 100%; }
+   185→   185→    .form-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px double #1a1a1a; padding-bottom: 8px; margin-bottom: 10px; }
+   186→   186→    .header-left { display: flex; gap: 10px; align-items: flex-start; }
+   187→   187→    .header-title h1 { font-size: 13px; margin: 0; font-weight: bold; text-transform: uppercase; }
+   188→   188→    .header-title h2 { font-size: 11px; margin: 2px 0; font-weight: bold; text-transform: uppercase; }
+   189→   189→    .header-title .subtitle { font-size: 9px; margin-top: 3px; font-weight: bold; }
+   190→   190→    .header-right { text-align: right; font-size: 9px; }
+   191→   191→    .header-right .doc-id { font-weight: bold; border: 1px solid #1a1a1a; padding: 2px 6px; display: inline-block; margin-bottom: 4px; }
+   192→   192→    .school-info { margin: 8px 0; font-size: 10px; line-height: 1.5; }
+   193→   193→    .school-info .row { display: flex; gap: 4px; }
+   194→   194→    .school-info .label { min-width: 90px; font-weight: 600; }
+   195→   195→    .school-info .sep { font-weight: 600; }
+   196→   196→    .school-info .inline-row { display: flex; gap: 24px; flex-wrap: wrap; }
+   197→   197→    .school-info .inline-row .item { display: flex; gap: 4px; }
+   198→   198→    table.form-table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 9px; }
+   199→   199→    table.form-table th, table.form-table td { border: 1px solid #1a1a1a; padding: 3px 4px; text-align: center; vertical-align: middle; }
+   200→   200→    table.form-table th { background: #f1f5f9; font-weight: bold; font-size: 8.5px; }
+   201→   201→    table.form-table td.nama-cell { text-align: left; }
+   202→   202→    table.form-table .no-col { width: 28px; }
+   203→   203→    table.form-table .month-group { background: #e2e8f0; font-weight: bold; font-size: 9px; }
+   204→   204→    table.form-table .eff-day { background: #fef3c7; font-size: 7.5px; font-style: italic; }
+   205→   205→    table.form-table .qty-col { background: #fef9c3; font-weight: bold; }
+   206→   206→    table.form-table .pct-col { background: #dcfce7; font-weight: bold; }
+   207→   207→    table.form-table .check-cell { background: #fff; width: 26px; }
+   208→   208→    table.form-table tr:nth-child(even) td { background: #fafafa; }
+   209→   209→    table.form-table tr:nth-child(even) td.check-cell { background: #f5f5f5; }
+   210→   210→    .check-mark { display: inline-flex; align-items: center; justify-content: center; }
+   211→   211→    .form-footer { margin-top: 16px; display: flex; justify-content: flex-end; gap: 20px; }
+   212→   212→    .signature-area { width: 38%; text-align: center; }
+   213→   213→    .signature-area .place-date { margin-bottom: 8px; font-size: 10px; }
+   214→   214→    .signature-area .role-label { font-size: 9px; margin-bottom: 50px; }
+   215→   215→    .signature-block { position: relative; display: inline-block; }
+   216→   216→    .sig-stamp-overlay { position: absolute; top: -40px; left: 50%; transform: translateX(-35%) rotate(-12deg); opacity: 0.9; z-index: 2; pointer-events: none; }
+   217→   217→    .sig-name-svg { display: flex; justify-content: center; margin-bottom: 2px; }
+   218→   218→    .sig-line { border-top: 1px solid #1a1a1a; width: 85%; margin: 0 auto 2px; }
+   219→   219→    .sig-name { font-size: 10px; }
+   220→   220→    .sig-nip { font-size: 9px; }
+   221→   221→    .sig-role { font-size: 8.5px; color: #555; margin-top: 1px; }
+   222→   222→    .bsre-stamp { display: inline-block; }
+   223→   223→    .note-box { margin-top: 12px; padding: 8px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 8.5px; border-radius: 3px; }
+   224→   224→    .note-box strong { color: #b91c1c; }
+   225→   225→    .note-box ul { margin: 4px 0 0 16px; padding: 0; }
+   226→   226→    .note-box li { margin-bottom: 2px; }
+   227→   227→    .bsre-note { margin-top: 10px; padding: 8px; border: 1px solid #b91c1c; background: #fef2f2; font-size: 8.5px; border-radius: 3px; text-align: center; }
+   228→   228→    .bsre-note strong { color: #b91c1c; }
+   229→   229→    .legend { display: flex; gap: 16px; font-size: 8.5px; margin-top: 6px; align-items: center; flex-wrap: wrap; }
+   230→   230→    .legend-item { display: flex; gap: 4px; align-items: center; }
+   231→   231→    .form-title-banner { background: #1e3a5f; color: #fff; padding: 6px 12px; text-align: center; font-weight: bold; font-size: 12px; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px; }
+   232→   232→    .summary-row { display: flex; gap: 12px; margin: 8px 0; font-size: 9.5px; }
+   233→   233→    .summary-card { flex: 1; border: 1px solid #cbd5e1; padding: 6px 10px; border-radius: 3px; background: #f8fafc; }
+   234→   234→    .summary-card .label { font-size: 8px; color: #64748b; text-transform: uppercase; }
+   235→   235→    .summary-card .value { font-size: 14px; font-weight: bold; color: #1e3a5f; }
+   236→   236→    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+   237→   237→  </style>`
+   238→   238→}
+   239→   239→
+   240→   240→/* ============================================================
+   241→   241→   Random attendance generator — average 90-100%
+   242→   242→   Generates ALPA/IZIN/SAKIT values so % falls in 90-100% range
+   243→   243→   ============================================================ */
+   244→   244→export function randomMonthAttendance(
+   245→   245→  monthName: string,
+   246→   246→  hariEfektif = 22
+   247→   247→): MonthAttendance {
+   248→   248→  // Target percent between 90-100%
+   249→   249→  const targetPercent = 90 + Math.floor(Math.random() * 11) // 90-100
+   250→   250→  const absent = Math.round(((100 - targetPercent) / 100) * hariEfektif)
+   251→   251→  // Distribute absent days across alpa/izin/sakit (prefer izin/sakit, low alpa)
+   252→   252→  const alpa = Math.floor(Math.random() * 2) // 0-1
+   253→   253→  const sakit = Math.floor(Math.random() * (absent - alpa + 1))
+   254→   254→  const izin = Math.max(0, absent - alpa - sakit)
+   255→   255→  const jml = Math.max(0, hariEfektif - alpa - izin - sakit)
+   256→   256→  const percent = Math.round((jml / hariEfektif) * 100)
+   257→   257→  return { nama: monthName, hariEfektif, alpa, izin, sakit, jml, percent }
+   258→   258→}
+   259→   259→
+   260→   260→// Build a single student row's attendance cells for all 3 months
+   261→   261→function buildAttendanceCells(
+   262→   262→  record: PKHRecord,
+   263→   263→  rowIdx: number
+   264→   264→): string {
+   265→   265→  const months = record.bulan || []
+   266→   266→  return months
+   267→   267→    .map((m, mi) => {
+   268→   268→      const present = m.percent >= 75
+   269→   269→      return `
+   270→   270→      <td class="qty-col" style="font-size:8px;">${m.hariEfektif}</td>
+   271→   271→      <td>${m.alpa}</td>
+   272→   272→      <td>${m.izin}</td>
+   273→   273→      <td>${m.sakit}</td>
+   274→   274→      <td class="qty-col">${m.jml}</td>
+   275→   275→      <td class="pct-col">${m.percent}%</td>
+   276→   276→      <td class="check-cell">${checkForCell(rowIdx, mi, present)}</td>`
+   277→   277→    })
+   278→   278→    .join('')
+   279→   279→}
+   280→   280→
+   281→   281→// Calculate hari efektif header row for the month group
+   282→   282→function buildEffDayRow(months: string[], sample: PKHRecord[]): string {
+   283→   283→  return months
+   284→   284→    .map((m) => {
+   285→   285→      const he = sample[0]?.bulan?.find((b) => b.nama === m)?.hariEfektif || 22
+   286→   286→      return `<td class="eff-day" colspan="7">Hari Efektif: ${he}</td>`
+   287→   287→    })
+   288→   288→    .join('')
+   289→   289→}
+   290→   290→
+   291→   291→// Sub-header row: ALPA IZIN SAKIT JML % ✓ per month
+   292→   292→function buildSubHeaderRow(months: string[]): string {
+   293→   293→  return months
+   294→   294→    .map(() => {
+   295→   295→      return `
+   296→   296→      <td style="font-size:7px;">HE</td>
+   297→   297→      <td style="font-size:7px;">A</td>
+   298→   298→      <td style="font-size:7px;">I</td>
+   299→   299→      <td style="font-size:7px;">S</td>
+   300→   300→      <td style="font-size:7px;">JML</td>
+   301→   301→      <td style="font-size:7px;">%</td>
+   302→   302→      <td style="font-size:7px;">✓</td>`
+   303→   303→    })
+   304→   304→    .join('')
+   305→   305→}
+   306→   306→
+   307→   307→/* ============================================================
+   308→   308→   Build the main attendance table (same concept for all 3 form types)
+   309→   309→   Education: NIK Pengurus, Nama Pengurus, NIK Siswa, NISN, Nama Siswa, Tingkat
+   310→   310→   Health:    NIK Pengurus, Nama Pengurus, NIK, Nama, Posyandu, Usia
+   311→   311→   Social:    NIK, Nama, Alamat, Kelurahan, Jenis Bantuan, Jumlah
+   312→   312→   ============================================================ */
+   313→   313→function buildAttendanceTable(data: PKHFormData): string {
+   314→   314→  const months = data.months
+   315→   315→  const monthSpan = 7 // HE, A, I, S, JML, %, ✓
+   316→   316→
+   317→   317→  // Form-type-specific identity columns
+   318→   318→  let idHeaders: string
+   319→   319→  let renderIdCells: (r: PKHRecord) => string
+   320→   320→
+   321→   321→  if (data.formType === 'education') {
+   322→   322→    idHeaders = `
+   323→   323→      <th class="no-col" rowspan="3">No</th>
+   324→   324→      <th rowspan="3">NIK Pengurus</th>
+   325→   325→      <th rowspan="3">Nama Pengurus</th>
+   326→   326→      <th rowspan="3">NIK Siswa</th>
+   327→   327→      <th rowspan="3">NISN</th>
+   328→   328→      <th rowspan="3">Nama Siswa</th>
+   329→   329→      <th rowspan="3" style="width:70px;">Bentuk Pendidikan / Tingkat</th>`
+   330→   330→    renderIdCells = (r) => `
+   331→   331→      <td class="no-col">${r.no}</td>
+   332→   332→      <td style="font-size:8px;">${r.nikPengurus || '-'}</td>
+   333→   333→      <td class="nama-cell">${r.namaPengurus || '-'}</td>
+   334→   334→      <td style="font-size:8px;">${r.nik}</td>
+   335→   335→      <td style="font-size:8px;">${r.nisn || '-'}</td>
+   336→   336→      <td class="nama-cell">${r.nama}</td>
+   337→   337→      <td>${r.bentukPendidikan || ''} ${r.tingkat || ''}</td>`
+   338→   338→  } else if (data.formType === 'health') {
+   339→   339→    idHeaders = `
+   340→   340→      <th class="no-col" rowspan="3">No</th>
+   341→   341→      <th rowspan="3">NIK Pengurus</th>
+   342→   342→      <th rowspan="3">Nama Pengurus</th>
+   343→   343→      <th rowspan="3">NIK Peserta</th>
+   344→   344→      <th rowspan="3">Nama Peserta</th>
+   345→   345→      <th rowspan="3">Posyandu</th>
+   346→   346→      <th rowspan="3" style="width:60px;">Usia / BB-TB</th>`
+   347→   347→    renderIdCells = (r) => `
+   348→   348→      <td class="no-col">${r.no}</td>
+   349→   349→      <td style="font-size:8px;">${r.nikPengurus || '-'}</td>
+   350→   350→      <td class="nama-cell">${r.namaPengurus || '-'}</td>
+   351→   351→      <td style="font-size:8px;">${r.nik}</td>
+   352→   352→      <td class="nama-cell">${r.nama}</td>
+   353→   353→      <td class="nama-cell">${r.posyandu || '-'}</td>
+   354→   354→      <td>${r.beratBadan ? `${r.beratBadan}/${r.tinggiBadan || '-'}` : '-'}</td>`
+   355→   355→  } else {
+   356→   356→    idHeaders = `
+   357→   357→      <th class="no-col" rowspan="3">No</th>
+   358→   358→      <th rowspan="3">NIK</th>
+   359→   359→      <th rowspan="3">Nama Peserta</th>
+   360→   360→      <th rowspan="3">Alamat</th>
+   361→   361→      <th rowspan="3">Kelurahan/Desa</th>
+   362→   362→      <th rowspan="3">Jenis Bantuan</th>
+   363→   363→      <th rowspan="3" style="width:70px;">Jumlah / Status</th>`
+   364→   364→    renderIdCells = (r) => `
+   365→   365→      <td class="no-col">${r.no}</td>
+   366→   366→      <td style="font-size:8px;">${r.nik}</td>
+   367→   367→      <td class="nama-cell">${r.nama}</td>
+   368→   368→      <td class="nama-cell" style="font-size:8px;">${r.alamat || '-'}</td>
+   369→   369→      <td>${r.kelurahan || data.kelurahan || '-'}</td>
+   370→   370→      <td>${r.jenisBantuan || 'PKH Reguler'}</td>
+   371→   371→      <td style="font-size:8px;">${r.jumlahBantuan || '-'}<br/><span style="font-size:7px;color:${r.status === 'Aktif' ? '#16a34a' : '#b91c1c'};">${r.status || 'Aktif'}</span></td>`
+   372→   372→  }
+   373→   373→
+   374→   374→  const monthGroupHeaders = months
+   375→   375→    .map((m) => `<td class="month-group" colspan="${monthSpan}">${m}</td>`)
+   376→   376→    .join('')
+   377→   377→
+   378→   378→  const keteranganHeader = `<th rowspan="3" style="width:60px;">Keterangan</th><th rowspan="3" style="width:90px;">Nama Pendamping</th>`
+   379→   379→
+   380→   380→  const rows = data.records
+   381→   381→    .map((r, idx) => {
+   382→   382→      const avgPct = r.bulan.length
+   383→   383→        ? Math.round(r.bulan.reduce((s, m) => s + m.percent, 0) / r.bulan.length)
+   384→   384→        : 0
+   385→   385→      const keterangan = avgPct >= 75 ? 'Hadir' : 'Tidak Hadir'
+   386→   386→      return `
+   387→   387→      <tr>
+   388→   388→        ${renderIdCells(r)}
+   389→   389→        ${buildAttendanceCells(r, idx)}
+   390→   390→        <td style="font-size:8px;font-weight:600;color:${avgPct >= 75 ? '#16a34a' : '#b91c1c'};">${keterangan}</td>
+   391→   391→        <td style="font-size:8px;">${r.namaPendamping || data.facilitator || '-'}</td>
+   392→   392→      </tr>`
+   393→   393→    })
+   394→   394→    .join('')
+   395→   395→
+   396→   396→  return `
+   397→   397→  <table class="form-table">
+   398→   398→    <thead>
+   399→   399→      <tr>
+   400→   400→        ${idHeaders}
+   401→   401→        ${monthGroupHeaders}
+   402→   402→        ${keteranganHeader}
+   403→   403→      </tr>
+   404→   404→      <tr>
+   405→   405→        ${buildEffDayRow(months, data.records)}
+   406→   406→        <td rowspan="2" style="background:#f1f5f9;"></td>
+   407→   407→        <td rowspan="2" style="background:#f1f5f9;"></td>
+   408→   408→      </tr>
+   409→   409→      <tr>
+   410→   410→        ${buildSubHeaderRow(months)}
+   411→   411→      </tr>
+   412→   412→    </thead>
+   413→   413→    <tbody>
+   414→   414→      ${rows}
+   415→   415→    </tbody>
+   416→   416→  </table>`
+   417→   417→}
+   418→   418→
+   419→   419→/* ============================================================
+   420→   420→   Calculate summary statistics (random avg 90-100%)
+   421→   421→   ============================================================ */
+   422→   422→function calcSummary(data: PKHFormData) {
+   423→   423→  const total = data.records.length
+   424→   424→  let avgAttendance = 0
+   425→   425→  if (data.records.length > 0) {
+   426→   426→    const allPercents = data.records.flatMap((r) => r.bulan.map((m) => m.percent))
+   427→   427→    avgAttendance = Math.round(
+   428→   428→      allPercents.reduce((a, b) => a + b, 0) / (allPercents.length || 1)
+   429→   429→    )
+   430→   430→  }
+   431→   431→  return { total, avgAttendance }
+   432→   432→}
+   433→   433→
+   434→   434→/* ============================================================
+   435→   435→   Build complete HTML for a single form
+   436→   436→   ============================================================ */
+   437→   437→export function generateFormHTML(data: PKHFormData): string {
+   438→   438→  const title = FORM_TYPE_TITLES[data.formType]
+   439→   439→  const subtitle = FORM_TYPE_SUBTITLES[data.formType]
+   440→   440→  const label = FORM_TYPE_LABELS[data.formType]
+   441→   441→  const { total, avgAttendance } = calcSummary(data)
+   442→   442→
+   443→   443→  const tableHTML = buildAttendanceTable(data)
+   444→   444→
+   445→   445→  // Identity info block (form-type specific)
+   446→   446→  let identityHTML: string
+   447→   447→  if (data.formType === 'education') {
+   448→   448→    identityHTML = `
+   449→   449→    <div class="school-info">
+   450→   450→      <div class="inline-row">
+   451→   451→        <div class="item"><span class="label">NPSN</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
+   452→   452→        <div class="item"><span class="label">Nama Sekolah</span><span class="sep">:</span><span>${data.namaSekolah || '-'}</span></div>
+   453→   453→      </div>
+   454→   454→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
+   455→   455→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
+   456→   456→    </div>`
+   457→   457→  } else if (data.formType === 'health') {
+   458→   458→    identityHTML = `
+   459→   459→    <div class="school-info">
+   460→   460→      <div class="inline-row">
+   461→   461→        <div class="item"><span class="label">Posyandu</span><span class="sep">:</span><span>${data.namaSekolah || '-'}</span></div>
+   462→   462→        <div class="item"><span class="label">Kode Wilayah</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
+   463→   463→      </div>
+   464→   464→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
+   465→   465→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
+   466→   466→    </div>`
+   467→   467→  } else {
+   468→   468→    identityHTML = `
+   469→   469→    <div class="school-info">
+   470→   470→      <div class="inline-row">
+   471→   471→        <div class="item"><span class="label">Wilayah Layanan</span><span class="sep">:</span><span>${data.namaSekolah || data.kelurahan || '-'}</span></div>
+   472→   472→        <div class="item"><span class="label">Kode</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
+   473→   473→      </div>
+   474→   474→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
+   475→   475→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
+   476→   476→    </div>`
+   477→   477→  }
+   478→   478→
+   479→   479→  const summaryHTML = `
+   480→   480→    <div class="summary-row">
+   481→   481→      <div class="summary-card"><div class="label">Total ${data.formType === 'education' ? 'Siswa' : 'Peserta'}</div><div class="value">${total}</div></div>
+   482→   482→      <div class="summary-card"><div class="label">Rata-rata Kehadiran</div><div class="value">${avgAttendance}%</div></div>
+   483→   483→      <div class="summary-card"><div class="label">Periode</div><div class="value" style="font-size:10px;">${data.periode}</div></div>
+   484→   484→      <div class="summary-card"><div class="label">Kategori</div><div class="value" style="font-size:11px;">${label}</div></div>
+   485→   485→    </div>`
+   486→   486→
+   487→   487→  const legendHTML = `
+   488→   488→    <div class="legend">
+   489→   489→      <div class="legend-item"><span class="check-mark">${checkSVG(0)}</span> Hadir/Terlayani (≥75%)</div>
+   490→   490→      <div class="legend-item"><span style="display:inline-block;width:15px;color:#94a3b8;font-size:13px;">—</span> Tidak Hadir (&lt;75%)</div>
+   491→   491→      <div class="legend-item"><strong>HE</strong> = Hari Efektif</div>
+   492→   492→      <div class="legend-item"><strong>A</strong> = Alpa</div>
+   493→   493→      <div class="legend-item"><strong>I</strong> = Izin</div>
+   494→   494→      <div class="legend-item"><strong>S</strong> = Sakit</div>
+   495→   495→      <div class="legend-item"><strong>JML</strong> = HE − A − I − S</div>
+   496→   496→      <div class="legend-item"><strong>%</strong> = (JML ÷ HE) × 100</div>
+   497→   497→    </div>`
+   498→   498→
+   499→   499→  const today = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
+   500→   500→  const placeDate = `${data.kelurahan || data.kecamatan || ''}${data.kelurahan ? ', ' : ''}${today}`
+   501→   501→
+   502→   502→  return `<!DOCTYPE html>
+   503→   503→<html lang="id">
+   504→   504→<head>
+   505→   505→  <meta charset="UTF-8" />
+   506→   506→  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+   507→   507→  <title>${title} - PKH</title>
+   508→   508→  ${formCSS()}
+   509→   509→</head>
+   510→   510→<body>
+   511→   511→  <div class="page">
+   512→   512→    <div class="form-header">
+   513→   513→      <div class="header-left">
+   514→   514→        ${kemsosLogo()}
+   515→   515→        <div class="header-title">
+   516→   516→          <h1>${title}</h1>
+   517→   517→          <h2>${subtitle}</h2>
+   518→   518→          <div class="subtitle">PERIODE: ${data.periode}</div>
+   519→   519→        </div>
+   520→   520→      </div>
+   521→   521→      <div class="header-right">
+   522→   522→        <div class="doc-id">PKH-${data.formType.toUpperCase().slice(0, 3)}-${data.tahun || new Date().getFullYear()}</div>
+   523→   523→        <div>Triwulan ${data.triwulan || ''}</div>
+   524→   524→        <div style="color:#b91c1c;font-weight:bold;margin-top:3px;">☑ Disahkan dengan BSrE</div>
+   525→   525→      </div>
+   526→   526→    </div>
+   527→   527→
+   528→   528→    ${identityHTML}
+   529→   529→    ${summaryHTML}
+   530→   530→    ${tableHTML}
+   531→   531→    ${legendHTML}
+   532→   532→
+   533→   533→    <div class="note-box">
+   534→   534→      <strong>Catatan:</strong>
+   535→   535→      <ul>
+   536→   536→        <li><strong>JML</strong> = Hari Efektif − Alpa − Izin − Sakit</li>
+   537→   537→        <li><strong>%</strong> = (JML ÷ Hari Efektif) × 100</li>
+   538→   538→        <li>Verifikasi kehadiran telah dilakukan oleh Pendamping PKH</li>
+   539→   539→      </ul>
+   540→   540→    </div>
+   541→   541→
+   542→   542→    <div class="form-footer">
+   543→   543→      <div class="signature-area">
+   544→   544→        <div class="place-date">${placeDate}</div>
+   545→   545→        <div class="role-label">Mengetahui,<br/>${data.signerRole}</div>
+   546→   546→        ${signatureBlock(data.signerName, data.signerNIP, data.signerRole)}
+   547→   547→      </div>
+   548→   548→    </div>
+   549→   549→
+   550→   550→    <div class="bsre-note">
+   551→   551→      Dokumen ini telah diverifikasi dan ditandatangani secara elektronik menggunakan sertifikat
+   552→   552→      <strong>BSrE (Badan Siber dan Sandi Negara)</strong>.<br/>
+   553→   553→      Status keaslian dapat diverifikasi melalui <strong>validasi.bsre.bssn.go.id</strong>
+   554→   554→    </div>
+   555→   555→  </div>
+   556→   556→</body>
+   557→   557→</html>`
+   558→   558→}
+   559→   559→
+   560→   560→/* ============================================================
+   561→   561→   Build combined HTML document (multiple forms with page breaks)
+   562→   562→   ============================================================ */
+   563→   563→export function generateCombinedHTML(forms: PKHFormData[]): string {
+   564→   564→  const pages = forms
+   565→   565→    .map((f) => `<div class="page-break">${generateFormBody(f)}</div>`)
+   566→   566→    .join('')
+   567→   567→
+   568→   568→  return `<!DOCTYPE html>
+   569→   569→<html lang="id">
+   570→   570→<head>
+   571→   571→  <meta charset="UTF-8" />
+   572→   572→  <title>Dokumen Gabungan PKH - Kementerian Sosial</title>
+   573→   573→  ${formCSS()}
+   574→   574→  <style>
+   575→   575→    @page { size: A4 landscape; margin: 12mm; }
+   576→   576→    .page-break { page-break-after: always; }
+   577→   577→    .page-break:last-child { page-break-after: auto; }
+   578→   578→    .cover-page { height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; page-break-after: always; }
+   579→   579→    .cover-page h1 { font-size: 28px; color: #1e3a5f; margin-bottom: 8px; }
+   580→   580→    .cover-page h2 { font-size: 18px; color: #dc2626; }
+   581→   581→  </style>
+   582→   582→</head>
+   583→   583→<body>
+   584→   584→  <div class="cover-page">
+   585→   585→    ${kemsosLogo().replace('width="64" height="74"', 'width="110" height="126"')}
+   586→   586→    <h1 style="margin-top:24px;">KEMENTERIAN SOSIAL RI</h1>
+   587→   587→    <h2>Program Keluarga Harapan</h2>
+   588→   588→    <p style="font-size:14px;margin-top:12px;">Dokumen Gabungan Verifikasi Komitmen PKH</p>
+   589→   589→    <p style="font-size:12px;color:#64748b;">${forms.length} Formulir • Periode ${forms[0]?.periode || ''}</p>
+   590→   590→  </div>
+   591→   591→  ${pages}
+   592→   592→</body>
+   593→   593→</html>`
+   594→   594→}
+   595→   595→
+   596→   596→// Form body without html/head wrapper (for combined doc)
+   597→   597→function generateFormBody(data: PKHFormData): string {
+   598→   598→  const full = generateFormHTML(data)
+   599→   599→  const bodyMatch = full.match(/<body>([\s\S]*)<\/body>/)
+   600→   600→  return bodyMatch ? bodyMatch[1] : full
+   601→   601→}
+   602→   602→

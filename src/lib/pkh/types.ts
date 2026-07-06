@@ -70,6 +70,8 @@ export interface PKHFormData {
   records: PKHRecord[]
   // Months for this triwulan (3 month names)
   months: string[]
+  // Optional custom logo (data URL or path). Falls back to /pkh-logo.png
+  logoUrl?: string
 }
 
 export interface ParseResult {
