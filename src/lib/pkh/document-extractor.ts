@@ -1,14 +1,17 @@
 // PKH Document Extractor
 // Extracts text from PDF/TXT/DOCX/XLSX files and parses wilayah + form type + records
+// Quarterly (Triwulan) model — matches Form Verifikasi Komitmen template
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { writeFile, readFile, mkdir, unlink } from 'fs/promises'
+import { writeFile, mkdir, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import {
-  FormType, PKHFormData, PKHRecord, ParseResult, MONTHS_ID,
+  FormType, PKHFormData, PKHRecord, ParseResult,
+  TRIWULAN_MONTHS, DEFAULT_HARI_EFEKTIF,
 } from './types'
+import { randomMonthAttendance } from './form-generator'
 
 const execFileAsync = promisify(execFile)
 const PDF_SKILL_DIR = path.join(process.cwd(), 'skills', 'pdf')
@@ -16,7 +19,6 @@ const EXTRACT_TEXT = path.join(PDF_SKILL_DIR, 'scripts', 'pdf.py')
 const TMP_DIR = path.join(process.cwd(), 'tmp', 'pkh-upload')
 
 // Use the venv Python that has pdfplumber/pikepdf installed (the PDF skill deps).
-// Fall back to system python3 if the venv doesn't exist.
 const VENV_PYTHON = '/home/z/.venv/bin/python3'
 function getPythonBin(): string {
   try {
@@ -51,13 +53,11 @@ export async function extractTextFromPDF(filePath: string): Promise<string> {
   if (result.status !== 'success') {
     throw new Error(result.message || 'PDF text extraction failed')
   }
-  // Combine all pages
   return (result.data.pages || []).map((p: { text: string }) => p.text).join('\n')
 }
 
 // ---- DOCX/XLSX → PDF → text via LibreOffice (convert.office) ----
 export async function extractTextFromOffice(filePath: string, ext: 'docx' | 'xlsx'): Promise<string> {
-  // Use libreoffice to convert to PDF first, then extract text
   const outDir = path.dirname(filePath)
   const { stdout } = await execFileAsync(
     getPythonBin(),
@@ -76,56 +76,144 @@ export async function extractTextFromOffice(filePath: string, ext: 'docx' | 'xls
 }
 
 // ---- Wilayah extraction from text ----
-// Looks for patterns like "Provinsi : Jawa Barat" or "Kabupaten/Kota : Bandung"
-// Uses \b word boundaries to avoid false matches (e.g., "KELUARGA" matching "kel")
+// Handles both "Provinsi : Jawa Barat" (label: value) and
+// "Kec. Kraton, Kab. Pasuruan, Prov. Jawa Timur" (comma-separated single line)
 export function extractWilayahFromText(text: string): Partial<PKHFormData> {
   const result: Partial<PKHFormData> = {}
 
-  const patterns: Record<string, RegExp> = {
-    provinsi: /\bprovinsi\s*[:\-]?\s*([^\n\r|]+?)(?=\s+(?:kabupaten|kota|kecamatan|kelurahan|desa)\b|\n|\r|$)/i,
-    kabupaten: /\b(?:kabupaten(?:\s*\/\s*kota)?|kab\.?|kota)\s*[:\-]?\s*([^\n\r|]+?)(?=\s+(?:kecamatan|kelurahan|desa|provinsi)\b|\n|\r|$)/i,
-    kecamatan: /\bkecamatan\s*[:\-]?\s*([^\n\r|]+?)(?=\s+(?:kelurahan|desa|kabupaten|kota|provinsi)\b|\n|\r|$)/i,
-    // Handle "Kelurahan/Desa" as combined label — consume the optional "/Desa" part
-    kelurahan: /\b(?:kelurahan(?:\s*\/\s*desa)?|desa|kel\.)\s*[:\-]?\s*([^\n\r|]+?)(?=\s+(?:kecamatan|kabupaten|kota|provinsi)\b|\n|\r|$)/i,
+  // Strategy: find each field label and capture up to the next comma+label or end of line
+  // This handles "Kec. Kraton, Kab. Pasuruan, Prov. Jawa Timur" → Kecamatan=Kraton, Kab=Pasuruan, Prov=Jawa Timur
+  // Labels: "provinsi" or "prov." (with period). Use lookahead for separator to handle
+  // the period correctly (period is not a word char, so \b after it fails).
+  const fieldPatterns: Record<string, RegExp> = {
+    provinsi: /\bprov(?:insi|\.)(?=\s|:|-|\n|,\s)/i,
+    kabupaten: /\b(?:kabupaten|kab\.)(?=\s|:|-|\n|,\s)/i,
+    kecamatan: /\b(?:kecamatan|kec\.)(?=\s|:|-|\n|,\s)/i,
+    kelurahan: /\b(?:kelurahan|kel\.|desa)(?=\s|:|-|\n|,\s)/i,
   }
 
-  for (const [field, regex] of Object.entries(patterns)) {
-    const match = text.match(regex)
-    if (match && match[1]) {
-      let value = match[1].trim().replace(/\s+/g, ' ')
-      // Clean up: remove leading "/Kota :" or "/Desa :" artifacts and trailing punctuation
+  // For each field, find the label, then capture the value up to the next comma+label or newline
+  for (const [field, labelRegex] of Object.entries(fieldPatterns)) {
+    const labelMatch = text.match(labelRegex)
+    if (!labelMatch) continue
+    const afterLabel = text.substring((labelMatch.index || 0) + labelMatch[0].length)
+    // Capture value: up to comma+nextlabel, or end of line
+    const valueMatch = afterLabel.match(/^\s*[:\-]?\s*([^,\n\r|]+?)(?=,?\s*(?:kec\.|kecamatan|kab\.|kabupaten|kel\.|kelurahan|desa|prov\.|provinsi|kota)(?:\s|:|-|\n|,)|,?\s*\n|,?\s*\r|$)/i)
+    if (valueMatch && valueMatch[1]) {
+      let value = valueMatch[1].trim().replace(/\s+/g, ' ')
       value = value
         .replace(/^(?:\/\s*(?:kota|desa)\s*[:\-]?\s*)/i, '')
-        .replace(/[:\-]+$/, '')
+        .replace(/[:\-;,.]+$/, '')
         .trim()
-      if (value.length > 1 && value.length < 100) {
+      if (value.length > 1 && value.length < 80) {
         ;(result as Record<string, unknown>)[field] = value
       }
     }
   }
 
-  // Periode — look for "Periode:" followed by a month-year range like "Januari - Desember 2024"
-  const periodeMatch = text.match(/\bperiode\s*[:\-]?\s*([A-Za-z]+\s*[-–]\s*[A-Za-z]+\s+\d{4})/i)
-  if (periodeMatch && periodeMatch[1]) {
-    const val = periodeMatch[1].trim().replace(/\s+/g, ' ')
-    if (val.length > 3 && val.length < 80) {
+  // Fallback: if kelurahan is empty but "Alamat : <place>" exists, use it as kelurahan/desa
+  if (!result.kelurahan) {
+    const alamatOnly = text.match(/\balamat\s*[:\-]?\s*([A-Za-z][^\n\r,|]{2,40}?)(?=,?\s*(?:kec|kab|prov|npsn|nik)\b|,?\s*\n|,?\s*\r|$)/i)
+    if (alamatOnly && alamatOnly[1]) {
+      const val = alamatOnly[1].trim().replace(/\s+/g, ' ')
+      if (val.length > 2 && val.length < 50) {
+        result.kelurahan = val
+      }
+    }
+  }
+
+  // Periode — TRIWULAN X TAHUN YYYY
+  const triwulanMatch = text.match(/\btriwulan\s*(\d)\s*tahun\s*(\d{4})\b/i)
+  if (triwulanMatch) {
+    const triwulan = parseInt(triwulanMatch[1], 10)
+    const tahun = parseInt(triwulanMatch[2], 10)
+    result.triwulan = triwulan
+    result.tahun = tahun
+    result.periode = `TRIWULAN ${triwulan} TAHUN ${tahun}`
+  } else {
+    const periodeMatch = text.match(/\bperiode\s*[:\-]?\s*([^\n\r]+)/i)
+    if (periodeMatch && periodeMatch[1]) {
+      const val = periodeMatch[1].trim().replace(/\s+/g, ' ').substring(0, 60)
       result.periode = val
     }
   }
 
-  // Facilitator name — look for a capitalized name after "Pendamping PKH" label
-  const facMatch = text.match(/\bpendamping\s+pkh\b[\s\S]{0,60}?([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4})/i)
-  if (facMatch && facMatch[1]) {
-    const val = facMatch[1].trim().replace(/\s+/g, ' ')
-    if (val.length > 3 && val.length < 80) {
-      result.facilitator = val
+  // NPSN (8-digit school code)
+  const npsnMatch = text.match(/\bnpsn\s*[:\-]?\s*(\d{8})\b/i)
+  if (npsnMatch) result.npsn = npsnMatch[1]
+
+  // Nama Sekolah / Posyandu / Wilayah
+  const sekolahMatch = text.match(/\bnama\s+sekolah\s*[:\-]?\s*([^\n\r|]+?)(?=\s+(?:alamat|kec|kab|prov|npsn|nik)\b|\n|\r|$)/i)
+  if (sekolahMatch && sekolahMatch[1]) {
+    result.namaSekolah = sekolahMatch[1].trim().replace(/\s+/g, ' ').substring(0, 100)
+  }
+
+  // Alamat Sekolah
+  const alamatMatch = text.match(/\balamat\s*[:\-]?\s*([^\n\r|]+?)(?=\s+(?:kec|kab|prov|npsn|nik)\b|\n|\r|$)/i)
+  if (alamatMatch && alamatMatch[1]) {
+    result.alamatSekolah = alamatMatch[1].trim().replace(/\s+/g, ' ').substring(0, 120)
+  }
+
+  // Signer role — look for role labels near a NIP line
+  const signerRoleMatch = text.match(/\b(kepala\s+sekolah|kepala\s+desa|kepala\s+lurah|koordinator\s+pkh|pendamping\s+pkh)\b/i)
+  if (signerRoleMatch) {
+    result.signerRole = signerRoleMatch[1].trim()
+  }
+
+  // Signer NIP — find any NIP line and clean it (remove stray letters/spaces from stamp overlap)
+  // Example garbled: "NIP. 196 T807151993031008" → "196807151993031008"
+  const nipLineMatch = text.match(/\bNIP\.?\s*[:\-]?\s*([\d\sA-Za-z]{16,24})/i)
+  if (nipLineMatch && nipLineMatch[1]) {
+    // Keep only digits, then validate length
+    const cleaned = nipLineMatch[1].replace(/\D/g, '')
+    if (cleaned.length >= 16 && cleaned.length <= 18) {
+      result.signerNIP = cleaned
     }
   }
 
-  // NIP — find the one associated with "Pendamping PKH" (within 200 chars)
-  const nipMatch = text.match(/\bpendamping\s+pkh\b[\s\S]{0,300}?\bnip\.?\s*[:\-]?\s*(\d{16,18})/i)
-  if (nipMatch && nipMatch[1]) {
-    result.nipFacilitator = nipMatch[1]
+  // Signer name — look for a capitalized name between role label and NIP
+  // The name may have stamp text overlapping (garbled), so find the best name-like pattern
+  if (signerRoleMatch) {
+    const roleEnd = (signerRoleMatch.index || 0) + signerRoleMatch[0].length
+    const nipIdx = text.indexOf('NIP', roleEnd)
+    if (nipIdx > roleEnd) {
+      const between = text.substring(roleEnd, nipIdx)
+      // Match an Indonesian name: optional honorific + 2+ capitalized words + optional academic titles
+      // e.g. "H. MOH. HANSAN, S.Pd.I, M.Pd"
+      // Find ALL matches and pick the best name candidate
+      const namePattern = /(?:(?:H\.|Hj\.|Drs\.|Dr\.|KH\.)\s+)?[A-Z][A-Za-z.']+(?:\s+[A-Z][A-Za-z.']*){1,6}(?:,?\s*(?:S\.Pd\.I|S\.Pd|S\.Ag|S\.Si|S\.Sos|S\.Kom|M\.Pd|M\.Si|M\.Sc|M\.A|M\.Pd\.I|M\.Ag|B\.A|Ph\.D))?/g
+      const allMatches = between.match(namePattern) || []
+      // Score each match: prefer names with academic titles, penalize garbled text
+      // (too many single-letter words = stamp overlap noise)
+      const headerWords = /^(Form|Dokumen|Status|Periode|Alamat|NPSN|Nama|Sekolah|Kementerian|Program|Direktorat|Catatan|Mengetahui|Triwulan|Tahun|Verifikasi|Komitmen|Pendidikan|Kesehatan|Kesejahteraan|Sosial|Pendamping|Koordinator|Kepala|Desa|Lurah|Provinsi|Kabupaten|Kecamatan|Kelurahan|Bentuk|Tingkat|Hari|Efektif|Alpa|Izin|Sakit|Jml|Persentase|Keterangan|Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember|Tangan|Tanda|Diverifikasi|Ditandatangani|Secara|Elektronik|Menggunakan|Sertifikat|Badan|Siber|Sandi|Negara|Keaslian|Dapat|Melalui|Validasi|Disahkan|BSrE|PKH|RI)$/i
+      const scored = allMatches
+        .map((m) => {
+          const trimmed = m.trim()
+          const words = trimmed.split(/\s+/)
+          // Count single-letter words (excluding honorifics like "H.")
+          const singleLetters = words.filter((w) => w.length === 1 && !/^[HK]$/.test(w)).length
+          const hasTitle = /\.(Pd|Ag|Si|Sos|Kom|Sc|A)\b/.test(trimmed) || /\b(Drs|Dr|Ph)\./.test(trimmed)
+          const isHeader = headerWords.test(trimmed)
+          let score = trimmed.length
+          if (hasTitle) score += 50 // strong preference for academic titles
+          score -= singleLetters * 10 // penalize garbled single-letter words
+          if (isHeader) score -= 100
+          if (singleLetters >= 2) score -= 50 // heavily penalize 2+ single letters
+          return { name: trimmed, score }
+        })
+        .filter((s) => s.score > 0 && s.name.length > 5)
+        .sort((a, b) => b.score - a.score)
+      if (scored.length > 0) {
+        result.signerName = scored[0].name.replace(/\s+/g, ' ').substring(0, 80)
+      }
+    }
+  }
+
+  // Facilitator (Pendamping PKH) name — appears in table rows after "Hadir" keyword
+  const facMatch = text.match(/\bhadir\s+([A-Z][A-Z\.'\s]{3,40}?)(?=\s*(?:catatan|mengetahui|kepala|nip|form|dokumen|\n|\r))/i)
+  if (facMatch && facMatch[1]) {
+    const val = facMatch[1].trim().replace(/\s+/g, ' ')
+    if (val.length > 3 && val.length < 50) result.facilitator = val
   }
 
   return result
@@ -135,16 +223,14 @@ export function extractWilayahFromText(text: string): Partial<PKHFormData> {
 export function detectFormTypeFromText(text: string): FormType {
   const lower = text.toLowerCase()
 
-  // Education indicators
   const eduScore =
-    (lower.match(/kehadiran\s+anak\s+pendidikan/g)?.length || 0) * 3 +
+    (lower.match(/pendidikan/g)?.length || 0) * 3 +
     (lower.match(/sekolah/g)?.length || 0) * 2 +
     (lower.match(/kelas\b/g)?.length || 0) +
-    (lower.match(/jenjang/g)?.length || 0) +
-    (lower.match(/\b(sd|smp|sma|smk|mi|mts|ma)\b/g)?.length || 0) +
-    (lower.match(/pendidikan/g)?.length || 0)
+    (lower.match(/jenjang|tingkat/g)?.length || 0) +
+    (lower.match(/\b(sd|smp|sma|smk|mi|mts|ma|madrasah)\b/g)?.length || 0) * 2 +
+    (lower.match(/nisn|npsn/g)?.length || 0) * 2
 
-  // Health indicators
   const healthScore =
     (lower.match(/kesehatan/g)?.length || 0) * 2 +
     (lower.match(/posyandu/g)?.length || 0) * 3 +
@@ -153,7 +239,6 @@ export function detectFormTypeFromText(text: string): FormType {
     (lower.match(/tinggi\s*badan|\btb\b/g)?.length || 0) +
     (lower.match(/keluarga\s+sehat/g)?.length || 0) * 2
 
-  // Social welfare indicators
   const socialScore =
     (lower.match(/kesejahteraan\s+sosial/g)?.length || 0) * 3 +
     (lower.match(/\bbantuan\b/g)?.length || 0) * 2 +
@@ -164,130 +249,166 @@ export function detectFormTypeFromText(text: string): FormType {
   if (eduScore >= healthScore && eduScore >= socialScore && eduScore > 0) return 'education'
   if (healthScore >= socialScore && healthScore > 0) return 'health'
   if (socialScore > 0) return 'social'
-
-  // Default
   return 'social'
 }
 
-// ---- Parse boolean value ----
-function parseBool(val: string): boolean {
-  const v = val.toLowerCase().trim()
-  return ['1', 'true', 'ya', 'hadir', 'v', 'x', '✓', 'check', 'lunas', 'selesai', 'baik', 'hadir/terlayani'].includes(v)
-}
-
 // ---- Parse records from extracted text table ----
-// PDF table layout: [Name line] / [No NIK marks QTY %] / [School • Jenjang Kelas]
-// Also handles structured (key:value) text. Skips NIP signature lines.
-export function parseRecordsFromText(text: string, formType: FormType): PKHRecord[] {
+// Looks for NIK (14-18 digit) patterns and builds student/participant records
+export function parseRecordsFromText(
+  text: string,
+  formType: FormType,
+  months: string[],
+  hariEfektif = DEFAULT_HARI_EFEKTIF
+): PKHRecord[] {
   const records: PKHRecord[] = []
   const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean)
 
-  // NIK = 14-18 digit number (Indonesian NIK is 16 digits, but allow 14-18 for flexibility)
-  // Skip NIP signature lines separately below
+  // NIK = 14-18 digit number
   const nikRegex = /\b(\d{14,18})\b/
+
+  // Collect all NIKs in order of appearance (deduplicated)
+  const seenNiks = new Set<string>()
 
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li]
-    // Skip NIP signature lines (e.g., "NIP. 196505121990031002 NIP. ...")
+    // Skip NIP signature lines
     if (/^\s*nip\.?\s/i.test(line)) continue
-    // Skip lines that are clearly signature/role labels
-    if (/^(kepala\s+desa|pendamping\s+pkh|koordinator\s+pkh|mengetahui|disusun|menyetujui)/i.test(line)) continue
+    if (/^(kepala\s+sekolah|kepala\s+desa|pendamping\s+pkh|koordinator\s+pkh|mengetahui|disusun|menyetujui|catatan|dokumen|status|form|program|periode|alamat|npsn|nama\s+sekolah|direktorat|kementerian)/i.test(line)) continue
 
     const nikMatch = line.match(nikRegex)
     if (!nikMatch) continue
 
     const nik = nikMatch[1]
+    if (seenNiks.has(nik)) continue
+    seenNiks.add(nik)
+
     const beforeNik = line.substring(0, nikMatch.index || 0).trim()
     const afterNik = line.substring((nikMatch.index || 0) + nik.length).trim()
 
-    // Extract No (number before NIK)
+    // Extract No
     const noMatch = beforeNik.match(/(\d+)\s*$/)
     const no = noMatch ? parseInt(noMatch[1], 10) : records.length + 1
 
-    // Name: check the PREVIOUS line (common in PDF tables — name is above the NIK row)
+    // Find all NIKs (14-18 digit) and NISN (10 digit) on the line
+    // Pattern from PDF: "1 3526024107900229 SOFIYATUL 3526020412090003 0095992329 MOH. QORRIFARDAN MA Kelas 10"
+    const allNiks = line.match(/\b\d{14,18}\b/g) || []
+    const allNisn = line.match(/\b\d{10}\b/g) || []
+
+    let nikPengurus = ''
+    let nikSiswa = nik
+    let nisn = ''
+    let namaPengurus = ''
     let nama = ''
-    if (li > 0) {
-      const prevLine = lines[li - 1]
-      // Previous line should be a name (no NIK, no "NIP", not a header, has letters)
-      if (
-        prevLine.length > 2 &&
-        prevLine.length < 60 &&
-        !nikRegex.test(prevLine) &&
-        !/^\s*nip\.?\s/i.test(prevLine) &&
-        !/^(no|nama|nik|sekolah|posyandu|kecamatan|kelurahan|provinsi|kabupaten|kehadiran|pemeriksaan|bantuan|status|periode|total|kategori|formulir|kementerian|program|direktorat|catatan|hadir|tidak|qty|persentase|jenis|jumlah)/i.test(prevLine) &&
-        /[A-Za-z]/.test(prevLine) &&
-        !/\d{4,}/.test(prevLine) // avoid lines with years/numbers
-      ) {
-        nama = prevLine.replace(/[—\-•]+$/, '').trim()
+
+    if (formType === 'education' && allNiks.length >= 2) {
+      // Structured education row: No NIKPengurus NamaPengurus NIKSiswa NISN NamaSiswa Bentuk Tingkat
+      nikPengurus = allNiks[0]
+      nikSiswa = allNiks[1]
+      // NISN is the 10-digit number after the second NIK
+      nisn = allNisn.find((n) => {
+        const pos = line.indexOf(n)
+        return pos > line.indexOf(nikSiswa)
+      }) || allNisn[0] || ''
+
+      // Nama Pengurus = text between first NIK and second NIK
+      const p1 = line.indexOf(nikPengurus)
+      const p2 = line.indexOf(nikSiswa, p1 + nikPengurus.length)
+      if (p2 > p1) {
+        namaPengurus = line.substring(p1 + nikPengurus.length, p2).trim()
+        if (namaPengurus.length > 40) namaPengurus = namaPengurus.substring(0, 40)
+      }
+
+      // Nama Siswa = text after NISN up to the Bentuk Pendidikan keyword
+      if (nisn) {
+        const nisnPos = line.indexOf(nisn, p2)
+        if (nisnPos >= 0) {
+          let afterNisn = line.substring(nisnPos + nisn.length).trim()
+          // Stop at bentuk pendidikan keywords (SD, SMP, SMA, MA, MTs, MI, PAUD, TK) or "Kelas"
+          const bentukStop = afterNisn.match(/\s+(?:SDN?|SMPN?|SMAN?|SMKN?|MTsN?|MAN?|MIN?|PAUD|TK|Madrasah)\b/i)
+          if (bentukStop && bentukStop.index !== undefined) {
+            nama = afterNisn.substring(0, bentukStop.index).trim()
+          } else {
+            // No bentuk found — take up to "Kelas" or first digit
+            const kelasStop = afterNisn.match(/\s+Kelas\s/i)
+            if (kelasStop && kelasStop.index !== undefined) {
+              nama = afterNisn.substring(0, kelasStop.index).trim()
+            } else {
+              nama = afterNisn.split(/\s{2,}/)[0].trim()
+            }
+          }
+        }
+      }
+    } else {
+      // Single-NIK row (health/social/simple): name from previous line or after NIK
+      if (li > 0) {
+        const prevLine = lines[li - 1]
+        if (
+          prevLine.length > 2 &&
+          prevLine.length < 60 &&
+          !nikRegex.test(prevLine) &&
+          !/^\s*nip\.?\s/i.test(prevLine) &&
+          !/^(no|nama|nik|sekolah|posyandu|kecamatan|kelurahan|provinsi|kabupaten|kehadiran|pemeriksaan|bantuan|status|periode|total|kategori|formulir|kementerian|program|direktorat|catatan|hadir|tidak|qty|persentase|jenis|jumlah|alpa|izin|sakit|jml|hari|efektif|keterangan|pendamping|april|mei|juni|juli|agustus|september|oktober|november|desember|januari|februari|maret|triwulan|tahun|nisn|npsn|bentuk|pendidikan|tingkat|verifikasi|komitmen)/i.test(prevLine) &&
+          /[A-Za-z]/.test(prevLine) &&
+          !/\d{4,}/.test(prevLine)
+        ) {
+          nama = prevLine.replace(/[—\-•]+$/, '').trim()
+        }
+      }
+      if (!nama) {
+        const namePart = afterNik.split(/\s{2,}|\n|—|–/)[0] || ''
+        if (namePart.length > 2 && /[A-Za-z]/.test(namePart) && !/^\d/.test(namePart)) {
+          nama = namePart.trim()
+        }
+      }
+      if (!nama) {
+        const words = afterNik.split(/\s+/).filter((w) => /[A-Za-z]/.test(w))
+        if (words.length > 0) nama = words.slice(0, 3).join(' ')
       }
     }
 
-    // If name not found on previous line, try after NIK on same line
-    if (!nama) {
-      const namePart = afterNik.split(/\s{2,}|\n|—|–/)[0] || ''
-      if (namePart.length > 2 && /[A-Za-z]/.test(namePart) && !/^\d/.test(namePart)) {
-        nama = namePart.trim()
-      }
-    }
-
-    if (!nama) {
-      // Fallback: use afterNik first words
-      const words = afterNik.split(/\s+/).filter((w) => /[A-Za-z]/.test(w))
-      if (words.length > 0) nama = words.slice(0, 3).join(' ')
-    }
-
-    // Clean up name
     nama = nama.replace(/[\d%]+$/, '').replace(/[—\-•]+$/, '').trim()
     if (nama.length > 50) nama = nama.substring(0, 50)
-
     if (!nama || nama.length < 2) continue
 
-    // School/Posyandu info: check the NEXT line
-    let extra = ''
-    if (li < lines.length - 1) {
-      const nextLine = lines[li + 1]
-      if (formType === 'education') {
-        const schoolMatch = nextLine.match(/((?:SDN?|SMPN?|SMAN?|SMKN?|MTs?|MA|PAUD)\s+\w+(?:\s+\d+)?)/i)
-        if (schoolMatch) extra = schoolMatch[1]
-      } else if (formType === 'health') {
-        const posyanduMatch = nextLine.match(/(posyandu\s+\w+)/i)
-        if (posyanduMatch) extra = posyanduMatch[1]
-      }
-    }
-    // Also try same line for school
-    if (!extra && formType === 'education') {
-      const schoolMatch = line.match(/((?:SDN?|SMPN?|SMAN?|SMKN?|MTs?|MA|PAUD)\s+\w+(?:\s+\d+)?)/i)
-      if (schoolMatch) extra = schoolMatch[1]
+    // Tingkat/Kelas and Bentuk Pendidikan
+    let tingkat = ''
+    let bentukPendidikan = ''
+    if (formType === 'education') {
+      const kelasMatch = line.match(/(?:kelas|kls)\s*(\d{1,2})/i)
+      if (kelasMatch) tingkat = `Kelas ${kelasMatch[1]}`
+      const bentukMatch = line.match(/\b(SDN?|SMPN?|SMAN?|SMKN?|MTs?N?|MA[N]?|MI[N]?|PAUD|TK)\b/i)
+      if (bentukMatch) bentukPendidikan = bentukMatch[1].toUpperCase()
     }
 
+    // Posyandu (health)
+    let posyandu = ''
+    if (formType === 'health') {
+      const posMatch = line.match(/posyandu\s+\w+/i)
+      if (posMatch) posyandu = posMatch[0]
+    }
+
+    // Build the record
     const record: PKHRecord = {
       no,
       nama,
-      nik,
+      nik: nikSiswa,
+      bulan: months.map((m) => randomMonthAttendance(m, hariEfektif)),
+      keterangan: 'Hadir',
+      namaPendamping: '',
     }
 
+    if (nikPengurus) record.nikPengurus = nikPengurus
+    if (namaPengurus) record.namaPengurus = namaPengurus
+    if (nisn) record.nisn = nisn
+    if (tingkat) record.tingkat = tingkat
+    if (bentukPendidikan) record.bentukPendidikan = bentukPendidikan
     if (formType === 'education') {
-      record.sekolah = extra
-      if (extra) {
-        const e = extra.toLowerCase()
-        if (e.includes('paud') || e.includes('tk')) record.jenjang = 'PAUD'
-        else if (e.includes('sd') || e.includes('mi')) record.jenjang = 'SD'
-        else if (e.includes('smp') || e.includes('mts')) record.jenjang = 'SMP'
-        else if (e.includes('sma') || e.includes('smk') || e.includes('ma')) record.jenjang = 'SMA'
-      }
-      // Try to find kelas number from next line (e.g., "SMP 7")
-      const nextLine = li < lines.length - 1 ? lines[li + 1] : ''
-      const kelasMatch = nextLine.match(/(?:SD|SMP|SMA|MI|MTs|MA)\s+(\d{1,2})\b/i) || line.match(/(?:SD|SMP|SMA|MI|MTs|MA)\s+(\d{1,2})\b/i)
-      if (kelasMatch) record.kelas = kelasMatch[1]
-      record.kehadiran = extractMonthlyBooleans(line, text, records.length)
-    } else if (formType === 'health') {
-      record.posyandu = extra
-      record.pemeriksaan = extractMonthlyBooleans(line, text, records.length)
-    } else {
-      record.bantuan = 'PKH Reguler'
-      record.status = line.match(/tidak\s+aktif/i) ? 'Tidak Aktif' : 'Aktif'
-      const amountMatch = line.match(/rp\.?\s*([\d.]+)/i)
-      if (amountMatch) record.jumlahBantuan = `Rp ${amountMatch[1]}`
+      record.sekolah = ''
+    }
+    if (formType === 'health' && posyandu) record.posyandu = posyandu
+    if (formType === 'social') {
+      record.jenisBantuan = 'PKH Reguler'
+      record.status = 'Aktif'
     }
 
     records.push(record)
@@ -295,42 +416,6 @@ export function parseRecordsFromText(text: string, formType: FormType): PKHRecor
   }
 
   return records
-}
-
-// Extract 12 monthly boolean values from a record line + surrounding context
-function extractMonthlyBooleans(line: string, fullText: string, _index: number): boolean[] {
-  const months = new Array(12).fill(false)
-
-  // Look for month headers in the text to understand column positions
-  // For simplicity, we check if the line contains checkmarks (✓, v, x, 1) for each month
-  // This is a best-effort heuristic for PDF-extracted tables
-
-  // Check for explicit month abbreviations followed by marks
-  for (let m = 0; m < 12; m++) {
-    const monthLabel = MONTHS_ID[m]
-    const monthRegex = new RegExp(`${monthLabel}\\s*[:\\-]?\\s*(✓|v|x|1|0|hadir|ya|tidak)`, 'i')
-    const match = line.match(monthRegex) || fullText.match(monthRegex)
-    if (match) {
-      const mark = match[1].toLowerCase()
-      months[m] = ['✓', 'v', 'x', '1', 'hadir', 'ya'].includes(mark)
-    }
-  }
-
-  // If no explicit marks found, look for a row of marks after the name
-  if (months.every((m) => !m)) {
-    // Look for sequences of ✓/v/x/1/0/—/- on the line
-    const markSequence = line.match(/([✓vx10—\-✗\s]{12,})/g)
-    if (markSequence) {
-      const seq = markSequence[0].replace(/\s/g, '')
-      for (let i = 0; i < Math.min(12, seq.length); i++) {
-        const c = seq[i]
-        if (c === '✓' || c === 'v' || c === '1' || c === 'x') months[i] = true
-        else if (c === '0' || c === '—' || c === '-' || c === '✗') months[i] = false
-      }
-    }
-  }
-
-  return months
 }
 
 // ---- Main entry: extract data from any supported file type ----
@@ -351,19 +436,15 @@ export async function extractFromDocument(
     let formType: FormType = 'social'
 
     if (ext === 'json') {
-      // Parse as JSON directly
       const rawText = fileBuffer.toString('utf-8')
       return parseJSONDocument(rawText)
     }
-
     if (ext === 'csv') {
       const rawText = fileBuffer.toString('utf-8')
       return parseCSVDocument(rawText)
     }
-
     if (ext === 'txt') {
       text = fileBuffer.toString('utf-8')
-      // Try JSON first
       try {
         return parseJSONDocument(text)
       } catch {
@@ -396,7 +477,13 @@ export async function extractFromDocument(
     // For PDF/TXT/DOCX/XLSX: extract wilayah + form type + records from text
     wilayah = extractWilayahFromText(text)
     formType = detectFormTypeFromText(text)
-    records = parseRecordsFromText(text, formType)
+
+    // Determine months from triwulan (default Triwulan 2)
+    const triwulan = wilayah.triwulan || 2
+    const months = TRIWULAN_MONTHS[triwulan] || TRIWULAN_MONTHS[2]
+    const hariEfektif = DEFAULT_HARI_EFEKTIF
+
+    records = parseRecordsFromText(text, formType, months, hariEfektif)
 
     if (records.length === 0) {
       return {
@@ -411,17 +498,24 @@ export async function extractFromDocument(
     // Build form data — use ONLY extracted wilayah, no hardcoded defaults
     const data: PKHFormData = {
       formType,
-      periode: wilayah.periode || '',
+      periode: wilayah.periode || `TRIWULAN 2 TAHUN ${new Date().getFullYear()}`,
+      triwulan: wilayah.triwulan || 2,
+      tahun: wilayah.tahun || new Date().getFullYear(),
       provinsi: wilayah.provinsi || '',
       kabupaten: wilayah.kabupaten || '',
       kecamatan: wilayah.kecamatan || '',
       kelurahan: wilayah.kelurahan || '',
+      npsn: wilayah.npsn || '',
+      namaSekolah: wilayah.namaSekolah || '',
+      alamatSekolah: wilayah.alamatSekolah || '',
+      signerName: wilayah.signerName || '',
+      signerNIP: wilayah.signerNIP || '',
+      signerRole: wilayah.signerRole || (formType === 'education' ? 'Kepala Sekolah' : 'Kepala Desa'),
       facilitator: wilayah.facilitator || '',
       nipFacilitator: wilayah.nipFacilitator || '',
       records,
-      // Track source for cross-check display
-      ...(wilayah.provinsi ? {} : {}),
-    } as PKHFormData
+      months,
+    }
 
     return {
       success: true,
@@ -438,41 +532,53 @@ export async function extractFromDocument(
   }
 }
 
-// Extract column hints from text for display
 function extractColumnHints(text: string, formType: FormType): string[] {
   const cols = ['No', 'NIK', 'Nama']
   if (formType === 'education') {
-    cols.push('Sekolah', 'Kelas', 'Jenjang', 'Kehadiran (12 bulan)', 'QTY', '%')
+    cols.push('NIK Pengurus', 'Nama Pengurus', 'NISN', 'Tingkat', 'Bentuk Pendidikan')
   } else if (formType === 'health') {
-    cols.push('Posyandu', 'Pemeriksaan (12 bulan)', 'QTY', '%')
+    cols.push('Posyandu', 'BB/TB')
   } else {
-    cols.push('Bantuan', 'Jumlah', 'Status')
+    cols.push('Alamat', 'Jenis Bantuan', 'Status')
   }
+  cols.push('Hari Efektif', 'Alpa', 'Izin', 'Sakit', 'JML', '%')
   return cols
 }
 
-// ---- JSON parsing (no hardcoded wilayah) ----
+// ---- JSON parsing (quarterly model, no hardcoded wilayah) ----
 function parseJSONDocument(rawText: string): ParseResult {
   const parsed = JSON.parse(rawText)
 
   if (parsed && typeof parsed === 'object' && Array.isArray(parsed.records)) {
     const keys = Object.keys(parsed.records[0] || {})
-    const formType = (parsed.formType as FormType) || detectFormType(keys)
-    const records = parsed.records.map((r: Record<string, string>, i: number) =>
-      buildRecord(r, i, formType)
+    const formType = (parsed.formType as FormType) || detectFormTypeFromText(rawText)
+    const triwulan = parsed.triwulan || 2
+    const months = parsed.months || TRIWULAN_MONTHS[triwulan] || TRIWULAN_MONTHS[2]
+    const hariEfektif = parsed.hariEfektif || DEFAULT_HARI_EFEKTIF
+
+    const records = parsed.records.map((r: Record<string, unknown>, i: number) =>
+      buildRecordFromObj(r, i, formType, months, hariEfektif)
     )
 
     const data: PKHFormData = {
       formType,
-      // Use values from file only — empty string if not present (NO hardcoded defaults)
-      periode: parsed.periode ?? '',
+      periode: parsed.periode ?? `TRIWULAN ${triwulan} TAHUN ${new Date().getFullYear()}`,
+      triwulan,
+      tahun: parsed.tahun || new Date().getFullYear(),
       provinsi: parsed.provinsi ?? '',
       kabupaten: parsed.kabupaten ?? '',
       kecamatan: parsed.kecamatan ?? '',
       kelurahan: parsed.kelurahan ?? '',
+      npsn: parsed.npsn ?? '',
+      namaSekolah: parsed.namaSekolah ?? '',
+      alamatSekolah: parsed.alamatSekolah ?? '',
+      signerName: parsed.signerName ?? '',
+      signerNIP: parsed.signerNIP ?? '',
+      signerRole: parsed.signerRole ?? (formType === 'education' ? 'Kepala Sekolah' : 'Kepala Desa'),
       facilitator: parsed.facilitator ?? '',
       nipFacilitator: parsed.nipFacilitator ?? '',
       records,
+      months,
     }
 
     return {
@@ -486,36 +592,37 @@ function parseJSONDocument(rawText: string): ParseResult {
 
   if (Array.isArray(parsed)) {
     const keys = Object.keys(parsed[0] || {})
-    const formType = detectFormType(keys)
-    const records = parsed.map((r: Record<string, string>, i: number) =>
-      buildRecord(r, i, formType)
+    const formType = detectFormTypeFromText(rawText)
+    const months = TRIWULAN_MONTHS[2]
+    const records = parsed.map((r: Record<string, unknown>, i: number) =>
+      buildRecordFromObj(r, i, formType, months, DEFAULT_HARI_EFEKTIF)
     )
 
     const data: PKHFormData = {
       formType,
-      periode: '',
+      periode: `TRIWULAN 2 TAHUN ${new Date().getFullYear()}`,
+      triwulan: 2,
+      tahun: new Date().getFullYear(),
       provinsi: '',
       kabupaten: '',
       kecamatan: '',
       kelurahan: '',
+      signerName: '',
+      signerNIP: '',
+      signerRole: formType === 'education' ? 'Kepala Sekolah' : 'Kepala Desa',
       facilitator: '',
       nipFacilitator: '',
       records,
+      months,
     }
 
-    return {
-      success: true,
-      formType,
-      data,
-      detectedColumns: keys,
-      totalRecords: records.length,
-    }
+    return { success: true, formType, data, detectedColumns: keys, totalRecords: records.length }
   }
 
   return { success: false, error: 'Unsupported JSON structure' }
 }
 
-// ---- CSV parsing (no hardcoded wilayah) ----
+// ---- CSV parsing (quarterly model, no hardcoded wilayah) ----
 function parseCSVDocument(rawText: string): ParseResult {
   const rows = parseCSVSimple(rawText)
   if (rows.length < 2) {
@@ -525,43 +632,41 @@ function parseCSVDocument(rawText: string): ParseResult {
   const header = rows[0]
   const dataRows = rows.slice(1)
   const formType = detectFormType(header)
+  const triwulan = 2
+  const months = TRIWULAN_MONTHS[triwulan]
+  const hariEfektif = DEFAULT_HARI_EFEKTIF
 
   const records = dataRows.map((row, i) => {
     const obj: Record<string, string> = {}
-    header.forEach((h, idx) => {
-      obj[h] = row[idx] || ''
-    })
-    return buildRecord(obj, i, formType)
+    header.forEach((h, idx) => { obj[h] = row[idx] || '' })
+    return buildRecordFromObj(obj as Record<string, unknown>, i, formType, months, hariEfektif)
   })
 
-  // Try to extract wilayah from CSV header rows (first 2-3 rows before data)
   const wilayah = extractWilayahFromCSV(rows)
 
   const data: PKHFormData = {
     formType,
-    periode: wilayah.periode ?? '',
+    periode: wilayah.periode ?? `TRIWULAN 2 TAHUN ${new Date().getFullYear()}`,
+    triwulan,
+    tahun: new Date().getFullYear(),
     provinsi: wilayah.provinsi ?? '',
     kabupaten: wilayah.kabupaten ?? '',
     kecamatan: wilayah.kecamatan ?? '',
     kelurahan: wilayah.kelurahan ?? '',
+    signerName: wilayah.signerName ?? '',
+    signerNIP: wilayah.signerNIP ?? '',
+    signerRole: formType === 'education' ? 'Kepala Sekolah' : 'Kepala Desa',
     facilitator: wilayah.facilitator ?? '',
     nipFacilitator: wilayah.nipFacilitator ?? '',
     records,
+    months,
   }
 
-  return {
-    success: true,
-    formType,
-    data,
-    detectedColumns: header,
-    totalRecords: records.length,
-  }
+  return { success: true, formType, data, detectedColumns: header, totalRecords: records.length }
 }
 
-// Look for wilayah in CSV metadata rows (rows before the actual data header)
 function extractWilayahFromCSV(rows: string[][]): Partial<PKHFormData> {
   const result: Partial<PKHFormData> = {}
-  // Check first 5 rows for metadata (key:value pairs)
   for (const row of rows.slice(0, 5)) {
     const joined = row.join(' ').toLowerCase()
     if (joined.includes('provinsi')) {
@@ -584,7 +689,7 @@ function extractWilayahFromCSV(rows: string[][]): Partial<PKHFormData> {
   return result
 }
 
-// ---- Helpers (moved from parser.ts to avoid circular imports) ----
+// ---- Helpers ----
 function normalizeKey(key: string): string {
   return key.toLowerCase().trim().replace(/[\s_\-\.]+/g, '')
 }
@@ -595,7 +700,7 @@ function detectFormType(keys: string[]): FormType {
     targets.some((t) => arr.some((k) => k.includes(t)))
 
   if (
-    has(norm, 'sekolah', 'kelas', 'jenjang', 'kehadiran') ||
+    has(norm, 'sekolah', 'kelas', 'jenjang', 'tingkat', 'nisn', 'npsn') ||
     has(norm, 'namasekolah') ||
     (has(norm, 'nik') && has(norm, 'kelas'))
   ) return 'education'
@@ -622,7 +727,6 @@ function parseCSVSimple(text: string): string[][] {
   for (let i = 0; i < text.length; i++) {
     const char = text[i]
     const next = text[i + 1]
-
     if (inQuotes) {
       if (char === '"' && next === '"') { field += '"'; i++ }
       else if (char === '"') { inQuotes = false }
@@ -644,69 +748,87 @@ function parseCSVSimple(text: string): string[][] {
   return rows.filter((r) => r.some((c) => c.length > 0))
 }
 
-function buildRecord(row: Record<string, string>, index: number, formType: FormType): PKHRecord {
+// Build a PKHRecord from a keyed object (JSON row or CSV row)
+function buildRecordFromObj(
+  row: Record<string, unknown>,
+  index: number,
+  formType: FormType,
+  months: string[],
+  hariEfektif: number
+): PKHRecord {
   const get = (...keys: string[]) => {
     for (const k of keys) {
       const nk = normalizeKey(k)
       const found = Object.keys(row).find((rk) => normalizeKey(rk) === nk)
-      if (found && row[found]) return row[found].trim()
+      if (found && row[found]) return String(row[found]).trim()
     }
     return undefined
   }
 
   const record: PKHRecord = {
     no: parseInt(get('no', 'nomor', 'number') || String(index + 1), 10),
-    nama: get('nama', 'name', 'namalengkap') || `Peserta ${index + 1}`,
-    nik: get('nik', 'nopen') || '',
+    nama: get('nama', 'name', 'namasiswa', 'namalengkap', 'namapeserta') || `Peserta ${index + 1}`,
+    nik: get('nik', 'niksiswa', 'nopen') || '',
+    bulan: months.map((m) => randomMonthAttendance(m, hariEfektif)),
   }
 
-  const tgl = get('tanggallahir', 'tanggal', 'tgl', 'birth')
-  if (tgl) record.tanggalLahir = tgl
+  // Pendidikan
+  record.nikPengurus = get('nikpengurus', 'nikkeluarga')
+  record.namaPengurus = get('namapengurus', 'namakeluarga')
+  record.nisn = get('nisn')
+  record.tingkat = get('tingkat', 'kelas', 'class')
+  record.bentukPendidikan = get('bentukpendidikan', 'jenjang', 'level') || deriveBentuk(record.tingkat)
+  record.sekolah = get('sekolah', 'namasekolah', 'school')
+
+  // Kesehatan
+  record.posyandu = get('posyandu', 'namaposyandu')
+  record.beratBadan = get('beratbadan', 'bb', 'weight')
+  record.tinggiBadan = get('tinggibadan', 'tb', 'height')
+
+  // Kesejahteraan Sosial
+  if (formType === 'social') {
+    record.jenisBantuan = get('bantuan', 'jenisbantuan', 'assistance') || 'PKH Reguler'
+    record.jumlahBantuan = get('jumlahbantuan', 'jumlah', 'amount')
+    record.status = get('status', 'stat') || 'Aktif'
+  }
+
+  // Common
+  record.alamat = get('alamat', 'address')
+  record.kelurahan = get('kelurahan', 'kel', 'desa')
+  record.kecamatan = get('kecamatan', 'kec')
+  record.namaPendamping = get('namapendamping', 'pendamping')
+  record.keterangan = 'Hadir'
 
   const jk = get('jeniskelamin', 'jk', 'gender')?.toUpperCase()
   if (jk && (jk.startsWith('L') || jk.startsWith('P'))) {
     record.jenisKelamin = jk.startsWith('L') ? 'L' : 'P'
   }
+  const tgl = get('tanggallahir', 'tanggal', 'tgl', 'birth')
+  if (tgl) record.tanggalLahir = tgl
 
-  record.alamat = get('alamat', 'address')
-  record.kecamatan = get('kecamatan', 'kec')
-  record.kelurahan = get('kelurahan', 'kel', 'desa')
-
-  if (formType === 'education') {
-    record.sekolah = get('sekolah', 'namasekolah', 'school')
-    record.kelas = get('kelas', 'class')
-    record.jenjang = get('jenjang', 'level') || deriveJenjang(record.kelas)
-    record.kehadiran = []
-    for (let m = 0; m < 12; m++) {
-      const monthLabel = MONTHS_ID[m].toLowerCase()
-      const val = get(`m${m + 1}`, `bulan${m + 1}`, monthLabel, `${m + 1}`) || ''
-      record.kehadiran.push(parseBool(val))
-    }
-  } else if (formType === 'health') {
-    record.posyandu = get('posyandu', 'namaposyandu')
-    record.beratBadan = get('beratbadan', 'bb', 'weight')
-    record.tinggiBadan = get('tinggibadan', 'tb', 'height')
-    record.pemeriksaan = []
-    for (let m = 0; m < 12; m++) {
-      const monthLabel = MONTHS_ID[m].toLowerCase()
-      const val = get(`m${m + 1}`, `bulan${m + 1}`, monthLabel, `p${m + 1}`) || ''
-      record.pemeriksaan.push(parseBool(val))
-    }
-  } else {
-    record.bantuan = get('bantuan', 'jenisbantuan', 'assistance')
-    record.jumlahBantuan = get('jumlahbantuan', 'jumlah', 'amount')
-    record.status = get('status', 'stat') || 'Aktif'
+  // Allow explicit bulan override from JSON
+  const bulanRaw = (row as Record<string, unknown>)['bulan']
+  if (Array.isArray(bulanRaw) && bulanRaw.length === 3) {
+    record.bulan = (bulanRaw as Array<Record<string, number>>).map((b, i) => {
+      const he = b.hariEfektif ?? hariEfektif
+      const alpa = b.alpa ?? 0
+      const izin = b.izin ?? 0
+      const sakit = b.sakit ?? 0
+      const jml = b.jml ?? Math.max(0, he - alpa - izin - sakit)
+      const percent = b.percent ?? Math.round((jml / he) * 100)
+      return { nama: months[i] || b.nama || '', hariEfektif: he, alpa, izin, sakit, jml, percent }
+    })
   }
 
   return record
 }
 
-function deriveJenjang(kelas?: string): string {
-  if (!kelas) return 'SD'
-  const k = kelas.toLowerCase()
+function deriveBentuk(tingkat?: string): string {
+  if (!tingkat) return ''
+  const k = tingkat.toLowerCase()
   if (k.includes('paud') || k.includes('tk')) return 'PAUD'
-  if (k.includes('sd') || k.includes('mi')) return 'SD'
-  if (k.includes('smp') || k.includes('mts')) return 'SMP'
-  if (k.includes('sma') || k.includes('smk') || k.includes('ma')) return 'SMA'
-  return 'SD'
+  if (k.includes('sd') || k.includes('mi')) return 'MI'
+  if (k.includes('smp') || k.includes('mts')) return 'MTs'
+  if (k.includes('sma') || k.includes('smk') || k.includes('ma')) return 'MA'
+  return ''
 }
