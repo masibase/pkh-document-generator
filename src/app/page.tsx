@@ -6,7 +6,7 @@ import {
   Upload, FileText, Sparkles, FileDown, CheckCircle2, Loader2,
   Database, ShieldCheck, Brain, ArrowRight, ArrowLeft, RefreshCw,
   Eye, Table2, FileSpreadsheet, AlertTriangle, TrendingUp,
-  Lightbulb, ClipboardCheck, Layers, ChevronRight,
+  Lightbulb, ClipboardCheck, Layers, ChevronRight, FileCheck2, MapPin,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,7 +30,7 @@ import {
 type Step = 0 | 1 | 2 | 3 | 4
 
 const STEPS = [
-  { id: 0, name: 'Upload Data', icon: Upload, desc: 'Muat file JSON/CSV atau data contoh' },
+  { id: 0, name: 'Upload Data', icon: Upload, desc: 'Muat file PDF/dokumen atau data contoh' },
   { id: 1, name: 'Tinjau Data', icon: Table2, desc: 'Verifikasi data dan jenis formulir' },
   { id: 2, name: 'Hasilkan Formulir', icon: FileText, desc: 'Generate HTML dengan tanda tangan & BSrE' },
   { id: 3, name: 'Analisis Neural', icon: Brain, desc: 'Analisis AI oleh neural engine' },
@@ -45,6 +45,8 @@ export default function Home() {
   const [loading, setLoading] = useState<'parse' | 'generate' | 'analyze' | 'pdf' | null>(null)
   const [combinedMode, setCombinedMode] = useState(false)
   const [previewTab, setPreviewTab] = useState<'form' | 'source'>('form')
+  const [sourceFile, setSourceFile] = useState<string>('')
+  const [sourceType, setSourceType] = useState<string>('')
 
   // ---- Step 0: Upload ----
   const handleFile = useCallback(async (file: File) => {
@@ -56,10 +58,16 @@ export default function Home() {
       const json = await res.json()
       if (json.success && json.data) {
         setFormData(json.data)
+        setSourceFile(json.sourceFile || file.name)
+        setSourceType(json.sourceType || '')
         setStep(1)
-        toast.success(`Terdeteksi: ${FORM_TYPE_LABELS[json.formType]} • ${json.totalRecords} catatan`)
+        const wilayahOk = json.data.provinsi || json.data.kabupaten || json.data.kecamatan || json.data.kelurahan
+        toast.success(
+          `Terdeteksi: ${FORM_TYPE_LABELS[json.formType]} • ${json.totalRecords} catatan` +
+          (wilayahOk ? ' • Wilayah dari dokumen' : ' • Lengkapi wilayah manual')
+        )
       } else {
-        toast.error(json.error || 'Gagal memparse file')
+        toast.error(json.error || 'Gagal memproses file')
       }
     } catch (e) {
       toast.error('Gagal mengunggah file')
@@ -79,6 +87,8 @@ export default function Home() {
       const json = await res.json()
       if (json.success && json.data) {
         setFormData(json.data)
+        setSourceFile(`Data Contoh — ${FORM_TYPE_LABELS[type]}`)
+        setSourceType('sample')
         setStep(1)
         toast.success(`Data contoh ${FORM_TYPE_LABELS[type]} dimuat (${json.data.records.length} catatan)`)
       }
@@ -185,6 +195,8 @@ export default function Home() {
     setFormData(null)
     setGeneratedHTML('')
     setAnalysis(null)
+    setSourceFile('')
+    setSourceType('')
     setStep(0)
   }
 
@@ -221,7 +233,7 @@ export default function Home() {
                 <UploadStep onFile={handleFile} onSample={loadSample} loading={loading === 'parse'} />
               )}
               {step === 1 && formData && (
-                <ReviewStep data={formData} onMeta={updateMeta} onType={changeFormType} />
+                <ReviewStep data={formData} onMeta={updateMeta} onType={changeFormType} sourceFile={sourceFile} sourceType={sourceType} />
               )}
               {step === 2 && formData && (
                 <GenerateStep
@@ -334,13 +346,16 @@ function Hero() {
         Generator Dokumen Program Keluarga Harapan
       </h1>
       <p className="text-muted-foreground max-w-2xl mx-auto text-sm sm:text-base">
-        Unggah data JSON/CSV, sistem otomatis mendeteksi jenis formulir (Pendidikan, Kesehatan,
-        Kesejahteraan Sosial), menghitung kehadiran, menghasilkan tanda tangan digital & stempel BSrE,
-        lalu menganalisis dengan neural engine dan mengekspor ke PDF.
+        Unggah file <strong>PDF/dokumen</strong> apa pun (PDF, TXT, JSON, CSV, DOCX, XLSX), sistem otomatis
+        mendeteksi jenis formulir (Pendidikan, Kesehatan, Kesejahteraan Sosial) dan <strong>mengambil data wilayah
+        langsung dari dokumen</strong> tanpa mengubah hasil, lalu menghasilkan tanda tangan digital & stempel BSrE,
+        menganalisis dengan neural engine, dan mengekspor ke PDF.
       </p>
       <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs">
         {[
+          { icon: FileText, label: 'PDF & All Doc Types' },
           { icon: Database, label: 'Auto-detect Form Type' },
+          { icon: MapPin, label: 'Wilayah dari Dokumen' },
           { icon: ClipboardCheck, label: 'Checkmark & QTY/% Calculation' },
           { icon: ShieldCheck, label: 'BSrE Digital Stamp' },
           { icon: Brain, label: 'Neural Engine Analysis' },
@@ -410,9 +425,9 @@ function UploadStep({
       <Card className="border-2 border-dashed border-slate-200 hover:border-red-300 transition-colors">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Upload className="h-4 w-4 text-red-600" /> Unggah File Data
+            <Upload className="h-4 w-4 text-red-600" /> Unggah File Dokumen
           </CardTitle>
-          <CardDescription>Dukungan format JSON atau CSV</CardDescription>
+          <CardDescription>Dukungan PDF, TXT, JSON, CSV, DOCX, XLSX</CardDescription>
         </CardHeader>
         <CardContent>
           <div
@@ -431,7 +446,7 @@ function UploadStep({
             <input
               ref={inputRef}
               type="file"
-              accept=".json,.csv"
+              accept=".pdf,.txt,.json,.csv,.docx,.xlsx"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0]
@@ -441,16 +456,21 @@ function UploadStep({
             {loading ? (
               <div className="flex flex-col items-center gap-2">
                 <Loader2 className="h-8 w-8 text-red-600 animate-spin" />
-                <p className="text-sm text-muted-foreground">Memproses...</p>
+                <p className="text-sm text-muted-foreground">Memproses dokumen...</p>
+                <p className="text-[11px] text-slate-400">Ekstraksi teks PDF mungkin membutuhkan beberapa detik</p>
               </div>
             ) : (
               <>
                 <div className="mx-auto h-12 w-12 rounded-full bg-red-100 flex items-center justify-center mb-3">
-                  <FileSpreadsheet className="h-6 w-6 text-red-600" />
+                  <FileText className="h-6 w-6 text-red-600" />
                 </div>
                 <p className="text-sm font-medium text-slate-700">Tarik & lepas file di sini</p>
                 <p className="text-xs text-muted-foreground mt-1">atau klik untuk memilih file</p>
-                <p className="text-[11px] text-slate-400 mt-3">Mendukung .json dan .csv</p>
+                <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                  {['PDF', 'TXT', 'JSON', 'CSV', 'DOCX', 'XLSX'].map((fmt) => (
+                    <span key={fmt} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">.{fmt.toLowerCase()}</span>
+                  ))}
+                </div>
               </>
             )}
           </div>
@@ -491,8 +511,9 @@ function UploadStep({
           <Alert className="bg-slate-50 border-slate-200">
             <AlertTriangle className="h-4 w-4 text-amber-500" />
             <AlertDescription className="text-xs text-slate-600">
-              Sistem akan <strong>otomatis mendeteksi</strong> jenis formulir berdasarkan kolom data
-              yang diunggah. Anda juga dapat mengubahnya secara manual di langkah berikutnya.
+              Sistem akan <strong>otomatis mendeteksi</strong> jenis formulir berdasarkan isi dokumen
+              dan <strong>mengambil data wilayah (kabupaten/kecamatan/desa) langsung dari file</strong> —
+              hasil tidak diubah. Anda juga dapat mengubah jenis formulir secara manual di langkah berikutnya.
             </AlertDescription>
           </Alert>
         </CardContent>
@@ -530,20 +551,82 @@ function SampleButton({
 
 /* ---------------- Step 1: Review ---------------- */
 function ReviewStep({
-  data, onMeta, onType,
+  data, onMeta, onType, sourceFile, sourceType,
 }: {
   data: PKHFormData
   onMeta: (f: keyof PKHFormData, v: string) => void
   onType: (t: FormType) => void
+  sourceFile: string
+  sourceType: string
 }) {
+  // Cross-check: which wilayah fields were extracted from the document?
+  const wilayahFields = [
+    { key: 'provinsi', label: 'Provinsi', value: data.provinsi },
+    { key: 'kabupaten', label: 'Kabupaten/Kota', value: data.kabupaten },
+    { key: 'kecamatan', label: 'Kecamatan', value: data.kecamatan },
+    { key: 'kelurahan', label: 'Kelurahan/Desa', value: data.kelurahan },
+  ] as const
+  const extractedCount = wilayahFields.filter((f) => f.value && f.value.trim().length > 0).length
+  const missingCount = wilayahFields.length - extractedCount
+
   return (
     <div className="space-y-5">
+      {/* Source file cross-check banner */}
+      {sourceFile && (
+        <Card className="border-blue-200 bg-blue-50/40">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-start gap-3">
+              <div className="h-9 w-9 rounded-md bg-blue-100 flex items-center justify-center shrink-0">
+                <FileCheck2 className="h-5 w-5 text-blue-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold text-slate-800">Sumber Dokumen:</span>
+                  <code className="text-xs px-2 py-0.5 rounded bg-white border text-slate-700 truncate max-w-[280px]">{sourceFile}</code>
+                  {sourceType && (
+                    <Badge variant="secondary" className="text-[10px] uppercase">{sourceType}</Badge>
+                  )}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                  <span className="flex items-center gap-1.5 text-slate-600">
+                    <MapPin className="h-3.5 w-3.5 text-blue-500" />
+                    Wilayah diekstrak dari dokumen:
+                  </span>
+                  {wilayahFields.map((f) => (
+                    <span key={f.key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] ${
+                      f.value?.trim()
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {f.value?.trim() ? (
+                        <CheckCircle2 className="h-3 w-3" />
+                      ) : (
+                        <AlertTriangle className="h-3 w-3" />
+                      )}
+                      {f.label}: {f.value?.trim() || 'kosong'}
+                    </span>
+                  ))}
+                </div>
+                {missingCount > 0 && (
+                  <p className="mt-2 text-[11px] text-amber-700">
+                    {missingCount} field wilayah tidak ditemukan di dokumen — silakan lengkapi manual di bawah.
+                    Data hasil tidak akan diubah oleh sistem.
+                  </p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Table2 className="h-4 w-4 text-red-600" /> Konfigurasi & Metadata Formulir
           </CardTitle>
-          <CardDescription>Verifikasi jenis formulir dan lengkapi metadata wilayah</CardDescription>
+          <CardDescription>
+            Verifikasi jenis formulir dan lengkapi metadata wilayah sesuai dokumen sumber
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -318,10 +318,10 @@ export function generateFormHTML(data: PKHFormData): string {
     <div class="form-title-banner">${title}</div>
 
     <div class="meta-grid">
-      <div><span class="label">Provinsi</span><span class="sep">:</span><span>${data.provinsi}</span></div>
-      <div><span class="label">Kabupaten/Kota</span><span class="sep">:</span><span>${data.kabupaten}</span></div>
-      <div><span class="label">Kecamatan</span><span class="sep">:</span><span>${data.kecamatan}</span></div>
-      <div><span class="label">Kelurahan/Desa</span><span class="sep">:</span><span>${data.kelurahan}</span></div>
+      <div><span class="label">Provinsi</span><span class="sep">:</span><span>${data.provinsi || '—'}</span></div>
+      <div><span class="label">Kabupaten/Kota</span><span class="sep">:</span><span>${data.kabupaten || '—'}</span></div>
+      <div><span class="label">Kecamatan</span><span class="sep">:</span><span>${data.kecamatan || '—'}</span></div>
+      <div><span class="label">Kelurahan/Desa</span><span class="sep">:</span><span>${data.kelurahan || '—'}</span></div>
     </div>
 
     ${summaryHTML}
@@ -336,7 +336,7 @@ export function generateFormHTML(data: PKHFormData): string {
 
     <div class="form-footer">
       <div class="signature-area">
-        <div class="place-date">${data.kelurahan}, ${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+        <div class="place-date">${data.kelurahan ? data.kelurahan + ', ' : ''}${new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
         <div style="font-size:9px;margin-bottom:4px;">Mengetahui,<br/>Kepala Desa/Lurah</div>
         ${signatureBlock('Drs. H. Bambang Suryanto', '196505121990031002', 'Kepala Desa')}
       </div>

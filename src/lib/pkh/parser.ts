@@ -194,13 +194,14 @@ function parseJSON(rawText: string): ParseResult {
 
     const data: PKHFormData = {
       formType,
-      periode: parsed.periode || 'Januari - Desember 2024',
-      provinsi: parsed.provinsi || 'Jawa Barat',
-      kabupaten: parsed.kabupaten || 'Bandung',
-      kecamatan: parsed.kecamatan || 'Coblong',
-      kelurahan: parsed.kelurahan || 'Cidadap',
-      facilitator: parsed.facilitator || 'Siti Aminah, S.Sos',
-      nipFacilitator: parsed.nipFacilitator || '198505152010012001',
+      // Preserve wilayah from uploaded data only — NO hardcoded defaults
+      periode: parsed.periode ?? '',
+      provinsi: parsed.provinsi ?? '',
+      kabupaten: parsed.kabupaten ?? '',
+      kecamatan: parsed.kecamatan ?? '',
+      kelurahan: parsed.kelurahan ?? '',
+      facilitator: parsed.facilitator ?? '',
+      nipFacilitator: parsed.nipFacilitator ?? '',
       records,
     }
 
@@ -223,13 +224,14 @@ function parseJSON(rawText: string): ParseResult {
 
     const data: PKHFormData = {
       formType,
-      periode: 'Januari - Desember 2024',
-      provinsi: 'Jawa Barat',
-      kabupaten: 'Bandung',
-      kecamatan: 'Coblong',
-      kelurahan: 'Cidadap',
-      facilitator: 'Siti Aminah, S.Sos',
-      nipFacilitator: '198505152010012001',
+      // No wilayah in array-only JSON — leave empty for user to fill
+      periode: '',
+      provinsi: '',
+      kabupaten: '',
+      kecamatan: '',
+      kelurahan: '',
+      facilitator: '',
+      nipFacilitator: '',
       records,
     }
 
@@ -265,13 +267,14 @@ function parseCSVText(rawText: string): ParseResult {
 
   const data: PKHFormData = {
     formType,
-    periode: 'Januari - Desember 2024',
-    provinsi: 'Jawa Barat',
-    kabupaten: 'Bandung',
-    kecamatan: 'Coblong',
-    kelurahan: 'Cidadap',
-    facilitator: 'Siti Aminah, S.Sos',
-    nipFacilitator: '198505152010012001',
+    // No wilayah in CSV header — leave empty for user to fill from document
+    periode: '',
+    provinsi: '',
+    kabupaten: '',
+    kecamatan: '',
+    kelurahan: '',
+    facilitator: '',
+    nipFacilitator: '',
     records,
   }
 

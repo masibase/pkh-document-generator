@@ -38,13 +38,13 @@ function randInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 function genNIK(): string {
-  // 16 digit - Jawa Barat (32) prefix
+  // 16 digit NIK - Jawa Barat (32) prefix, Bandung (73)
   let nik = '3273' // Bandung
   const year = String(randInt(60, 90))
   const month = String(randInt(1, 12)).padStart(2, '0')
   const day = String(randInt(1, 28)).padStart(2, '0')
-  nik += year + month + day
-  nik += String(randInt(1000, 9999))
+  nik += year + month + day // 4 + 6 = 10 digits
+  nik += String(randInt(100000, 999999)) // 6 digits → total 16
   return nik
 }
 function genTanggalLahir(): string {
