@@ -12,39 +12,95 @@ import {
 } from './types'
 
 /* ============================================================
-   7 SVG checkmark variations — pure handwritten ✓ stroke
+   7 SVG checkmark variations — natural handwritten ✓ stroke
    No circle/badge background — just ink on paper.
-   Each variant has slight rotation, stroke width, opacity,
-   and path variation for a natural handwritten look.
+
+   Handwriting techniques applied:
+   1. Two-segment paths with DIFFERENT stroke widths — the short
+      down-stroke is thinner (pen just touching) and the long
+      up-stroke is thicker (pen pressing). Simulates pen pressure.
+   2. Pronounced quadratic Bezier curves (Q) — not straight lines.
+   3. A small pen-lift "tail" at the end (slight overshoot).
+   4. An ink-bleed ghost stroke (offset, thinner, semi-transparent)
+      to simulate ink spreading on paper.
+   5. 7 variants with distinctly different shapes, rotations,
+      stroke widths, and opacities — natural variation.
    ============================================================ */
-const CHECKMARK_VARIANTS = [
-  // Variant 1: clean, slight right tilt
-  { rotate: 4, stroke: 2.0, opacity: 0.88, path: 'M3 13 L8 18 L20 5' },
-  // Variant 2: left tilt, thinner
-  { rotate: -5, stroke: 1.7, opacity: 0.82, path: 'M3.5 13.5 L8 18 L19.5 5.5' },
-  // Variant 3: bold, upright
-  { rotate: 1, stroke: 2.3, opacity: 0.9, path: 'M3.5 12.5 L8 17 L20 4.5' },
-  // Variant 4: heavy left tilt, thicker
-  { rotate: -9, stroke: 2.1, opacity: 0.85, path: 'M3 14 L8 18.5 L21 6' },
-  // Variant 5: right tilt, medium
-  { rotate: 7, stroke: 1.9, opacity: 0.86, path: 'M3.5 13 L8 17.5 L19 4' },
-  // Variant 6: slight left, thin & light
-  { rotate: -3, stroke: 1.6, opacity: 0.8, path: 'M4 13.5 L8.5 18 L20 5' },
-  // Variant 7: right tilt, bold
-  { rotate: 5, stroke: 2.2, opacity: 0.9, path: 'M3 12.5 L7.5 17 L20 4' },
+type CheckVariant = {
+  rotate: number
+  opacity: number
+  // down-stroke (short, lighter pressure)
+  down: { d: string; stroke: number }
+  // up-stroke (long, heavier pressure) with pen-lift tail
+  up: { d: string; stroke: number }
+}
+
+const CHECKMARK_VARIANTS: CheckVariant[] = [
+  // V1: gentle right tilt, medium pressure
+  {
+    rotate: 6, opacity: 0.85,
+    down: { d: 'M3.5 13 Q4.5 16 8 18', stroke: 1.5 },
+    up:   { d: 'M8 18 Q13 13 20 5 L21 4', stroke: 2.3 },
+  },
+  // V2: left tilt, thin pen, soft curve
+  {
+    rotate: -7, opacity: 0.78,
+    down: { d: 'M4 13.5 Q5 16.5 8.5 18', stroke: 1.2 },
+    up:   { d: 'M8.5 18 Q12.5 13.5 19.5 5.5 L20.5 4.8', stroke: 1.9 },
+  },
+  // V3: upright, bold, strong curve
+  {
+    rotate: 2, opacity: 0.88,
+    down: { d: 'M3 12.5 Q4 15.5 7.5 17', stroke: 1.7 },
+    up:   { d: 'M7.5 17 Q12.5 12 20 4.5 L21 3.8', stroke: 2.6 },
+  },
+  // V4: heavy left tilt, thick pen, wide
+  {
+    rotate: -11, opacity: 0.82,
+    down: { d: 'M3.5 14 Q5 17 8.5 18.5', stroke: 1.6 },
+    up:   { d: 'M8.5 18.5 Q13.5 14 21 6 L22 5.3', stroke: 2.4 },
+  },
+  // V5: right tilt, compact, medium
+  {
+    rotate: 9, opacity: 0.84,
+    down: { d: 'M4 13 Q5 15.5 8 17', stroke: 1.4 },
+    up:   { d: 'M8 17 Q12 12.5 19 4 L20 3.3', stroke: 2.1 },
+  },
+  // V6: slight left, light & thin
+  {
+    rotate: -4, opacity: 0.76,
+    down: { d: 'M4 13.5 Q5 16 8.5 18', stroke: 1.1 },
+    up:   { d: 'M8.5 18 Q13.5 13 20 5 L22 4', stroke: 1.7 },
+  },
+  // V7: right tilt, bold, wide arc
+  {
+    rotate: 7, opacity: 0.87,
+    down: { d: 'M3 12.5 Q4 15 7.5 17', stroke: 1.6 },
+    up:   { d: 'M7.5 17 Q13 11.5 20 4 L21.5 3.3', stroke: 2.5 },
+  },
 ]
 
 // Render a handwritten checkmark SVG using a specific variant (index 0-6)
-// Pure ink stroke — no background circle, mimics a pen-drawn ✓
+// Multiple strokes with varying widths simulate pen pressure variation.
+// An ink-bleed ghost (offset, thinner, semi-transparent) adds paper-ink texture.
 function checkSVG(variantIdx = 0): string {
   const v = CHECKMARK_VARIANTS[variantIdx % CHECKMARK_VARIANTS.length]
-  return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;transform:rotate(${v.rotate}deg);opacity:${v.opacity};"><path d="${v.path}" stroke="#1e3a5f" stroke-width="${v.stroke}" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  const ink = `#1e3a5f`
+  const ghostOffset = `translate(0.6,-0.4)`
+  return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;transform:rotate(${v.rotate}deg);opacity:${v.opacity};">` +
+    // Ink-bleed ghost (drawn first, behind main strokes): offset, thinner, semi-transparent
+    `<path d="${v.down.d} ${v.up.d}" stroke="${ink}" stroke-width="${(v.down.stroke * 0.5).toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" transform="${ghostOffset}"/>` +
+    // Main down-stroke (lighter pen pressure — thinner)
+    `<path d="${v.down.d}" stroke="${ink}" stroke-width="${v.down.stroke}" stroke-linecap="round" stroke-linejoin="round"/>` +
+    // Main up-stroke (heavier pen pressure — thicker, with pen-lift tail)
+    `<path d="${v.up.d}" stroke="${ink}" stroke-width="${v.up.stroke}" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `</svg>`
 }
 
 // Pick a deterministic-but-varied checkmark variant for a cell
 // so each cell in a row uses a different style (natural handwriting)
 function checkForCell(rowIdx: number, monthIdx: number, present: boolean): string {
-  if (!present) return `<span style="display:inline-block;width:18px;color:#94a3b8;font-size:13px;">—</span>`
+  if (!present) return `<span style="display:inline-block;width:22px;color:#94a3b8;font-size:13px;">—</span>`
   const variant = (rowIdx * 3 + monthIdx) % 7
   return `<span class="check-mark">${checkSVG(variant)}</span>`
 }
