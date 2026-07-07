@@ -8,7 +8,7 @@ import { existsSync } from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import {
-  FormType, PKHFormData, PKHRecord, ParseResult,
+  FormType, PKHFormData, PKHRecord, ParseResult, MonthAttendance,
   TRIWULAN_MONTHS, DEFAULT_HARI_EFEKTIF,
 } from './types'
 import { randomMonthAttendance } from './form-generator'
@@ -252,6 +252,102 @@ export function detectFormTypeFromText(text: string): FormType {
   return 'social'
 }
 
+// ---- Parse ACTUAL attendance data from extracted text ----
+// PDF structure (Triwulan = 3 months):
+//   Line: "APRIL MEI JUNI"
+//   Line: "Hari Efektif : 22 Hari Efektif : 20 Hari Efektif : 22 Keterangan Nama Pendamping"
+//   Line: "ALPA IZIN SAKIT JML % ALPA IZIN SAKIT JML % ALPA IZIN SAKIT JML %"
+//   Line: "0 0 1 21 95% 0 0 0 20 100% 0 1 0 21 95% Hadir ABDUL BASRI"
+// Returns: { hariEfektifPerMonth[], attendanceRows[] }
+export interface ParsedAttendanceRow {
+  bulan: MonthAttendance[]
+  keterangan: string
+  namaPendamping: string
+}
+export function parseAttendanceFromText(
+  text: string,
+  months: string[]
+): { hariEfektif: number[]; rows: ParsedAttendanceRow[] } {
+  const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean)
+
+  // 1) Extract Hari Efektif values (3 values, one per month)
+  //    Pattern: "Hari Efektif : 22" (may appear 3 times on one line or separate lines)
+  const hariEfektifVals: number[] = []
+  const heRegex = /hari\s*efektif\s*[:\-]?\s*(\d{1,2})/gi
+  let heMatch: RegExpExecArray | null
+  while ((heMatch = heRegex.exec(text)) !== null) {
+    const v = parseInt(heMatch[1], 10)
+    if (v > 0 && v <= 31) hariEfektifVals.push(v)
+  }
+  // Pad to 3 if fewer found
+  while (hariEfektifVals.length < 3) {
+    hariEfektifVals.push(hariEfektifVals[hariEfektifVals.length - 1] || 22)
+  }
+
+  // 2) Extract attendance data rows
+  // A valid attendance line has 15 numbers: [A I S JML %] × 3 months
+  // Percent values have "%" suffix. Line may also contain "Hadir"/"Tidak Hadir" + name.
+  // Pattern: "0 0 1 21 95% 0 0 0 20 100% 0 1 0 21 95% Hadir ABDUL BASRI"
+  const rows: ParsedAttendanceRow[] = []
+  // Match 3 groups of (num num num num num%)
+  const attRegex = /(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*%\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*%\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*%/
+
+  for (const line of lines) {
+    // Skip header lines
+    if (/^(hari\s*efektif|alpa|izin|sakit|jml|no|nik|nama|form|program|periode|catatan|mengetahui|kepala|nip|dokumen|status)/i.test(line)) continue
+    // Must start with a digit (attendance values)
+    if (!/^\d/.test(line)) continue
+
+    const m = line.match(attRegex)
+    if (!m) continue
+
+    const nums = m.slice(1, 16).map((n) => parseInt(n, 10))
+    // Group into 3 months: [A,I,S,JML,%]
+    const bulan: MonthAttendance[] = []
+    for (let mi = 0; mi < 3; mi++) {
+      const base = mi * 5
+      const alpa = nums[base]
+      const izin = nums[base + 1]
+      const sakit = nums[base + 2]
+      const jml = nums[base + 3]
+      const percent = nums[base + 4]
+      bulan.push({
+        nama: months[mi] || `BULAN${mi + 1}`,
+        hariEfektif: hariEfektifVals[mi] || 22,
+        alpa,
+        izin,
+        sakit,
+        jml,
+        percent,
+      })
+    }
+
+    // Extract Keterangan (Hadir / Tidak Hadir) from text after the attendance numbers
+    const afterAtt = line.substring(m.index! + m[0].length).trim()
+    let keterangan = 'Hadir'
+    const ketMatch = afterAtt.match(/(hadir|tidak\s+hadir)/i)
+    if (ketMatch) {
+      keterangan = ketMatch[1].replace(/\s+/g, ' ').trim()
+      keterangan = keterangan.charAt(0).toUpperCase() + keterangan.slice(1).toLowerCase()
+    }
+
+    // Extract Nama Pendamping: text after keterangan, uppercase words
+    let namaPendamping = ''
+    if (ketMatch && ketMatch.index !== undefined) {
+      const afterKet = afterAtt.substring(ketMatch.index + ketMatch[0].length).trim()
+      // Take uppercase words (Indonesian names are typically all-caps in these forms)
+      const nameMatch = afterKet.match(/([A-Z][A-Z\.'\s]{2,40})/)
+      if (nameMatch) {
+        namaPendamping = nameMatch[1].trim().replace(/\s+/g, ' ')
+      }
+    }
+
+    rows.push({ bulan, keterangan, namaPendamping })
+  }
+
+  return { hariEfektif: hariEfektifVals, rows }
+}
+
 // ---- Parse records from extracted text table ----
 // Looks for NIK (14-18 digit) patterns and builds student/participant records
 export function parseRecordsFromText(
@@ -262,6 +358,10 @@ export function parseRecordsFromText(
 ): PKHRecord[] {
   const records: PKHRecord[] = []
   const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean)
+
+  // Pre-parse ACTUAL attendance data from the document (not random)
+  // Falls back to random only when no attendance data is found in the file
+  const { rows: attRows } = parseAttendanceFromText(text, months)
 
   // NIK = 14-18 digit number
   const nikRegex = /\b(\d{14,18})\b/
@@ -388,13 +488,19 @@ export function parseRecordsFromText(
     }
 
     // Build the record
+    // Use ACTUAL attendance data from the document if available (matched by row order).
+    // Only fall back to random when the document has no attendance data.
+    const attIdx = records.length // 0-based index matching attendance row to student row
+    const parsedAtt = attRows[attIdx]
     const record: PKHRecord = {
       no,
       nama,
       nik: nikSiswa,
-      bulan: months.map((m) => randomMonthAttendance(m, hariEfektif)),
-      keterangan: 'Hadir',
-      namaPendamping: '',
+      bulan: parsedAtt
+        ? parsedAtt.bulan
+        : months.map((m) => randomMonthAttendance(m, hariEfektif)),
+      keterangan: parsedAtt?.keterangan || 'Hadir',
+      namaPendamping: parsedAtt?.namaPendamping || '',
     }
 
     if (nikPengurus) record.nikPengurus = nikPengurus
@@ -496,6 +602,8 @@ export async function extractFromDocument(
     detectedColumns = extractColumnHints(text, formType)
 
     // Build form data — use ONLY extracted wilayah, no hardcoded defaults
+    // Facilitator fallback: use namaPendamping from first parsed attendance row
+    const facilitatorFromAtt = records.find((r) => r.namaPendamping)?.namaPendamping || ''
     const data: PKHFormData = {
       formType,
       periode: wilayah.periode || `TRIWULAN 2 TAHUN ${new Date().getFullYear()}`,
@@ -511,7 +619,7 @@ export async function extractFromDocument(
       signerName: wilayah.signerName || '',
       signerNIP: wilayah.signerNIP || '',
       signerRole: wilayah.signerRole || (formType === 'education' ? 'Kepala Sekolah' : 'Kepala Desa'),
-      facilitator: wilayah.facilitator || '',
+      facilitator: wilayah.facilitator || facilitatorFromAtt || '',
       nipFacilitator: wilayah.nipFacilitator || '',
       records,
       months,

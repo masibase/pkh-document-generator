@@ -92,3 +92,58 @@ Stage Summary:
 - Colors: All red (#dc2626/#b91c1c/#991b1b/#fef2f2) replaced with dark blue (#1e3a5f/#172a4a/#eff6ff) across both form-generator.ts and page.tsx. Tailwind red-* classes → blue-* classes. Verified 0 red color codes in generated form HTML.
 - BSrE stamp: Now dark blue (#1e3a5f) at opacity 0.3 (70% transparent). Stroke widths increased slightly to maintain readability at low opacity. VLM confirmed stamp is visibly semi-transparent with readable text.
 - All existing features preserved: 7 SVG checkmark variations (green), quarterly attendance table, single signature block, random 90-100% attendance, wilayah from document, PDF export.
+
+---
+Task ID: 3
+Agent: main
+Task: Fix table data to match uploaded file exactly (no randomization); redesign checkmarks as pure handwriting style
+
+User Corrections:
+- koreksi untuk form tabel kolom dan baris: data tidak sesuai dengan file upload (perbaiki dan jangan merubah data. file upload. cek lagi.) = fix table columns/rows data to match uploaded file (don't change the uploaded file data, check again)
+- untuk variasi centang SVG cukup bergaya tulisan tangan, biar natural = for SVG checkmark variations, just handwriting style, to be natural
+
+Root Cause Analysis:
+- Issue 1 (data mismatch): parseRecordsFromText() line 395 used `months.map((m) => randomMonthAttendance(m, hariEfektif))` which generated RANDOM attendance values instead of parsing the ACTUAL values from the uploaded PDF. The PDF contains specific attendance data: APRIL(HE=22,A=0,I=0,S=1,JML=21,95%), MEI(HE=20,A=0,I=0,S=0,JML=20,100%), JUNI(HE=22,A=0,I=1,S=0,JML=21,95%).
+- Issue 2 (checkmarks not handwriting): CHECKMARK_VARIANTS had a green filled <circle> background with a white checkmark path inside — looked like a badge/stamp, NOT a handwritten checkmark.
+
+Work Log:
+- Added new function parseAttendanceFromText() to document-extractor.ts:
+  - Parses "Hari Efektif : N" values (3 per triwulan) using regex /hari\s*efektif\s*[:\-]?\s*(\d{1,2})/gi
+  - Parses attendance data rows: lines matching 15-number pattern [A I S JML %] × 3 months with % suffixes
+  - Extracts Keterangan ("Hadir"/"Tidak Hadir") from text after attendance numbers
+  - Extracts Nama Pendamping (uppercase name) after keterangan
+  - Returns { hariEfektif: number[], rows: ParsedAttendanceRow[] }
+  - Added MonthAttendance to imports from types.ts
+- Modified parseRecordsFromText():
+  - Pre-parses attendance data at function start: `const { rows: attRows } = parseAttendanceFromText(text, months)`
+  - Record building now uses ACTUAL data: `bulan: parsedAtt ? parsedAtt.bulan : months.map(random...)` (random only as fallback when no attendance in document)
+  - keterangan and namaPendamping now from parsed attendance data
+  - Records matched to attendance rows by index (row order)
+- Modified extractFromDocument():
+  - Added facilitator fallback: `facilitator: wilayah.facilitator || facilitatorFromAtt || ''` where facilitatorFromAtt = first record's namaPendamping
+- Redesigned CHECKMARK_VARIANTS in form-generator.ts:
+  - Removed green <circle> background entirely (hasCircleBackground: false confirmed via DOM inspection)
+  - Changed to pure ✓ stroke path: 'M3 13 L8 18 L20 5' (classic checkmark shape)
+  - Stroke color changed from #fff (white on green circle) to #1e3a5f (dark blue ink)
+  - 7 variants with natural variation: rotations (-9,-5,-3,1,4,5,7), stroke widths (1.6-2.3), opacity (0.80-0.90), slight path differences
+  - Increased SVG size from 15×15 to 18×18 for better visibility
+  - Updated absent dash width to match (18px)
+- ESLint: 0 errors, 0 warnings (clean)
+
+Verification Results (API + Agent Browser + VLM):
+- Parse API test: ✅ Exact PDF data extracted:
+  - Student: MOH. QORRIFARDAN, NIK 3526020412090003, NIK Pengurus 3526024107900229, Nama Pengurus SOFIYATUL, NISN 0095992329, MA Kelas 10
+  - APRIL: HE=22, A=0, I=0, S=1, JML=21, %=95 (matches PDF)
+  - MEI: HE=20, A=0, I=0, S=0, JML=20, %=100 (matches PDF)
+  - JUNI: HE=22, A=0, I=1, S=0, JML=21, %=95 (matches PDF)
+  - Keterangan: Hadir, Nama Pendamping: ABDUL BASRI, Facilitator: ABDUL BASRI
+- Review step table (VLM): ✅ 1 student row, MOH. QORRIFARDAN, APRIL 21/95%, MEI 20/100%, JUNI 21/95%, NIK Pengurus SOFIYATUL
+- Generated form table (VLM): ✅ All HE/A/I/S/JML/% values match PDF exactly; Keterangan "Hadir"; Nama Pendamping "ABDUL BASRI"
+- Checkmark style (VLM): ✅ "simple, handwritten-style pen strokes (✓) without any colored circle or badge background", "black or dark gray" (dark blue #1e3a5f)
+- Checkmark DOM inspection: hasCircleBackground=false, pathCount=1, strokeColor=#1e3a5f (confirmed pure handwriting)
+- Sample data fallback: ✅ Still works with random 90-100% attendance (avg 91%) when no attendance in document
+- PDF export: ✅ POST /api/pkh/export-pdf 200 in 1990ms
+
+Stage Summary:
+- Data fidelity: Form table now shows EXACT data from uploaded PDF — 1 student (MOH. QORRIFARDAN) with exact attendance values (APRIL 95%, MEI 100%, JUNI 95%), exact NIK/NISN/pengurus data, exact keterangan "Hadir", exact pendamping "ABDUL BASRI". No data is changed or randomized when present in the source file. Random attendance (90-100%) only used as fallback for documents without attendance data (e.g., sample data, JSON/CSV without attendance fields).
+- Checkmarks: Redesigned from green-circle-badge style to pure handwritten ✓ ink stroke (dark blue #1e3a5f, no background). 7 variants provide natural variation via rotation/stroke/opacity/path differences. VLM + DOM inspection confirmed no circle background, single path, ink color.

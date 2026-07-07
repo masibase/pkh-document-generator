@@ -12,85 +12,39 @@ import {
 } from './types'
 
 /* ============================================================
-   7 SVG checkmark variations — natural handwritten look
-   Each has different rotation, stroke width, opacity, and path
+   7 SVG checkmark variations — pure handwritten ✓ stroke
+   No circle/badge background — just ink on paper.
+   Each variant has slight rotation, stroke width, opacity,
+   and path variation for a natural handwritten look.
    ============================================================ */
 const CHECKMARK_VARIANTS = [
   // Variant 1: clean, slight right tilt
-  {
-    rotate: 4,
-    stroke: 2.6,
-    opacity: 0.95,
-    path: 'M7 12.5L10.5 16L17 9',
-    rx: '11',
-    fill: '#16a34a',
-  },
+  { rotate: 4, stroke: 2.0, opacity: 0.88, path: 'M3 13 L8 18 L20 5' },
   // Variant 2: left tilt, thinner
-  {
-    rotate: -6,
-    stroke: 2.2,
-    opacity: 0.88,
-    path: 'M6.5 13L10 16.5L17.5 8.5',
-    rx: '11',
-    fill: '#15803d',
-  },
+  { rotate: -5, stroke: 1.7, opacity: 0.82, path: 'M3.5 13.5 L8 18 L19.5 5.5' },
   // Variant 3: bold, upright
-  {
-    rotate: 1,
-    stroke: 3.0,
-    opacity: 0.92,
-    path: 'M7 12L10.5 15.5L17 8.5',
-    rx: '10',
-    fill: '#16a34a',
-  },
+  { rotate: 1, stroke: 2.3, opacity: 0.9, path: 'M3.5 12.5 L8 17 L20 4.5' },
   // Variant 4: heavy left tilt, thicker
-  {
-    rotate: -10,
-    stroke: 2.8,
-    opacity: 0.85,
-    path: 'M6 13.5L10 17L18 9',
-    rx: '12',
-    fill: '#166534',
-  },
+  { rotate: -9, stroke: 2.1, opacity: 0.85, path: 'M3 14 L8 18.5 L21 6' },
   // Variant 5: right tilt, medium
-  {
-    rotate: 8,
-    stroke: 2.4,
-    opacity: 0.9,
-    path: 'M7 12.5L10 16L17 8',
-    rx: '11',
-    fill: '#15803d',
-  },
+  { rotate: 7, stroke: 1.9, opacity: 0.86, path: 'M3.5 13 L8 17.5 L19 4' },
   // Variant 6: slight left, thin & light
-  {
-    rotate: -3,
-    stroke: 2.0,
-    opacity: 0.82,
-    path: 'M7 13L10.5 16.5L17.5 9',
-    rx: '11',
-    fill: '#16a34a',
-  },
-  // Variant 7: right tilt, very bold
-  {
-    rotate: 6,
-    stroke: 3.2,
-    opacity: 0.96,
-    path: 'M6.5 12L10 15.5L18 8',
-    rx: '10',
-    fill: '#166534',
-  },
+  { rotate: -3, stroke: 1.6, opacity: 0.8, path: 'M4 13.5 L8.5 18 L20 5' },
+  // Variant 7: right tilt, bold
+  { rotate: 5, stroke: 2.2, opacity: 0.9, path: 'M3 12.5 L7.5 17 L20 4' },
 ]
 
-// Render a checkmark SVG using a specific variant (index 0-6)
+// Render a handwritten checkmark SVG using a specific variant (index 0-6)
+// Pure ink stroke — no background circle, mimics a pen-drawn ✓
 function checkSVG(variantIdx = 0): string {
   const v = CHECKMARK_VARIANTS[variantIdx % CHECKMARK_VARIANTS.length]
-  return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;transform:rotate(${v.rotate}deg);opacity:${v.opacity};"><circle cx="12" cy="12" r="${v.rx}" fill="${v.fill}"/><path d="${v.path}" stroke="#fff" stroke-width="${v.stroke}" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;transform:rotate(${v.rotate}deg);opacity:${v.opacity};"><path d="${v.path}" stroke="#1e3a5f" stroke-width="${v.stroke}" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 }
 
 // Pick a deterministic-but-varied checkmark variant for a cell
 // so each cell in a row uses a different style (natural handwriting)
 function checkForCell(rowIdx: number, monthIdx: number, present: boolean): string {
-  if (!present) return `<span style="display:inline-block;width:15px;color:#94a3b8;font-size:13px;">—</span>`
+  if (!present) return `<span style="display:inline-block;width:18px;color:#94a3b8;font-size:13px;">—</span>`
   const variant = (rowIdx * 3 + monthIdx) % 7
   return `<span class="check-mark">${checkSVG(variant)}</span>`
 }
