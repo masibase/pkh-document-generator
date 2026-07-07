@@ -185,3 +185,57 @@ Verification Results (Agent Browser + VLM at 6x zoom):
 Stage Summary:
 - SVG checkmarks now have 5 distinct handwriting characteristics visible at form size: (1) curved Bezier strokes, (2) pen-pressure variation (thin down-stroke + thick up-stroke), (3) ink-bleed ghost, (4) pen-lift tail, (5) 7 visually distinct variants with varied rotations/widths/opacities. All confirmed by VLM at 6x zoom.
 - All previous corrections remain intact: table data fidelity (no randomization when source data present), dark blue color scheme (no red), 70% transparent BSrE stamp, colorful replaceable logo, quarterly format matching uploaded PDF, single signature block, Neural Engine Analysis removed.
+
+---
+Task ID: 5
+Agent: main
+Task: Thorough check and fix all errors (user reported "Executable not found in $PATH: python3" error)
+
+User Request:
+- cek secara menyeluruh dan fixkan error dan jangan sampai ada kendala setelahnya (check thoroughly and fix errors, ensure no issues afterward)
+- file_name: pasted_image_1783422851613.png (screenshot showing "Executable not found in $PATH: python3" error toast on Step 1)
+
+Root Cause Analysis:
+- The error "Executable not found in $PATH: python3" appeared when the dev server's environment didn't have python3 in PATH. The getPythonBin() function only tried /home/z/.venv/bin/python3 (which exists but is a symlink) and fell back to 'python3' (PATH lookup). If PATH didn't include standard binary dirs, the fallback failed.
+- The analyze API route still existed despite user previously requesting its removal.
+- The metadata description still mentioned "neural engine analysis".
+
+Fixes Applied:
+1. Robust Python path resolution (document-extractor.ts):
+   - Added PYTHON_CANDIDATES array with 3 absolute paths: /home/z/.venv/bin/python3, /usr/bin/python3, /usr/local/bin/python3
+   - Uses accessSync(candidate, constants.X_OK) to verify executability (not just existence)
+   - Caches resolved path in _resolvedPython for performance
+   - Falls back to 'python3' PATH lookup only as last resort
+2. Better error handling in extractTextFromPDF() and extractTextFromOffice():
+   - Catches ENOENT/not found/spawn errors and throws clearer message: "Python executable not available (path). Cannot extract PDF text."
+3. Robust Node path in export-pdf route:
+   - Uses process.execPath (absolute path to current node binary) instead of 'node' string
+   - Added ENOENT error handling with clear message
+4. Removed analyze API route entirely (src/app/api/pkh/analyze/)
+5. Updated layout.tsx metadata description: removed "neural engine analysis", replaced with "tanda tangan digital"
+6. Dev server stability fix: used double-fork approach (setsid + subshell) to keep server alive between Bash tool calls
+
+Verification Results:
+- All 4 API endpoints tested via curl:
+  - POST /api/pkh/sample-data (education/health/social): all 200 ✓
+  - POST /api/pkh/parse (PDF upload): 200 ✓ (Python path resolution works)
+  - POST /api/pkh/generate (all 3 form types): all 200 ✓
+  - POST /api/pkh/export-pdf: 200, valid PDF (88801 bytes) ✓
+- Full browser end-to-end test (all 3 form types):
+  - Pendidikan: Upload PDF → Review → Generate → Export PDF ✓ (no errors)
+  - Kesehatan: Sample Data → Review → Generate → Export PDF ✓ (no errors)
+  - Kesejahteraan Sosial: Sample Data → Review → Generate → Export PDF ✓ (no errors)
+- Browser console: no errors, only Fast Refresh logs
+- Browser errors: none
+- dev.log: all requests 200, no errors/warnings/ENOENT
+- ESLint: 0 errors, 0 warnings
+- VLM verification: Pendidikan form with APRIL/MEI/JUNI table, checkmarks, BSrE stamp, colorful logo, no red colors, no broken elements
+- Analyze route: removed, no references remain in codebase
+
+Stage Summary:
+- "python3 not found" error fixed via robust multi-path Python resolution with executability check
+- All potential executable-not-found errors handled with clear error messages
+- Analyze/Neural Engine feature fully removed (API route + metadata reference)
+- Dev server running stably on port 3000 (PID 4429, HTTP 200)
+- All 4 workflow steps work end-to-end for all 3 form types (Pendidikan, Kesehatan, Kesejahteraan Sosial)
+- No errors, no warnings, no broken elements — thoroughly verified

@@ -41,8 +41,11 @@ export async function POST(request: NextRequest) {
 
     // Run html2pdf-next.js - use --nopaged for Chromium native pagination
     // because our forms use A4 landscape with custom @page rules
+    // Use process.execPath (absolute path to current node) for reliability,
+    // falling back to 'node' PATH lookup.
+    const nodeBin = process.execPath || 'node'
     try {
-      const { stderr } = await execFileAsync('node', [
+      const { stderr } = await execFileAsync(nodeBin, [
         HTML2PDF,
         htmlPath,
         '--output', pdfPath,
@@ -59,10 +62,20 @@ export async function POST(request: NextRequest) {
       }
     } catch (execErr) {
       console.error('html2pdf execution failed:', execErr)
+      const msg = execErr instanceof Error ? execErr.message : String(execErr)
+      if (/ENOENT|not found|spawn/i.test(msg)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Node executable not available (${nodeBin}). Cannot generate PDF.`,
+          },
+          { status: 500 }
+        )
+      }
       return NextResponse.json(
         {
           success: false,
-          error: 'PDF generation failed: ' + (execErr instanceof Error ? execErr.message : 'unknown'),
+          error: 'PDF generation failed: ' + msg,
         },
         { status: 500 }
       )

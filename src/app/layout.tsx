@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "PKH Document Generator - Kementerian Sosial RI",
-  description: "Sistem otomasi dokumen Program Keluarga Harapan dengan neural engine analysis, BSrE digital stamp, dan ekspor PDF.",
+  description: "Sistem otomasi dokumen Program Keluarga Harapan dengan BSrE digital stamp, tanda tangan digital, dan ekspor PDF.",
   keywords: ["PKH", "Kementerian Sosial", "BSrE", "Document Generator", "Indonesia"],
   authors: [{ name: "Kementerian Sosial RI" }],
 };

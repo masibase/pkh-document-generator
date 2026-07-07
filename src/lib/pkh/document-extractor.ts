@@ -4,7 +4,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { writeFile, mkdir, unlink } from 'fs/promises'
-import { existsSync } from 'fs'
+import { existsSync, accessSync, constants } from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import {
@@ -18,14 +18,31 @@ const PDF_SKILL_DIR = path.join(process.cwd(), 'skills', 'pdf')
 const EXTRACT_TEXT = path.join(PDF_SKILL_DIR, 'scripts', 'pdf.py')
 const TMP_DIR = path.join(process.cwd(), 'tmp', 'pkh-upload')
 
-// Use the venv Python that has pdfplumber/pikepdf installed (the PDF skill deps).
-const VENV_PYTHON = '/home/z/.venv/bin/python3'
+// Robust Python binary resolution — try multiple known absolute paths first,
+// then fall back to PATH lookup. This prevents "Executable not found in $PATH"
+// errors when the dev server's PATH doesn't include standard binary dirs.
+const PYTHON_CANDIDATES = [
+  '/home/z/.venv/bin/python3',  // venv with pdfplumber/pikepdf (preferred)
+  '/usr/bin/python3',            // system python3 (fallback)
+  '/usr/local/bin/python3',      // alt install location
+]
+let _resolvedPython: string | null = null
 function getPythonBin(): string {
-  try {
-    if (existsSync(VENV_PYTHON)) return VENV_PYTHON
-  } catch {
-    // ignore
+  if (_resolvedPython) return _resolvedPython
+  for (const candidate of PYTHON_CANDIDATES) {
+    try {
+      if (existsSync(candidate)) {
+        // Verify it's actually executable
+        accessSync(candidate, constants.X_OK)
+        _resolvedPython = candidate
+        return candidate
+      }
+    } catch {
+      // exists but not executable — skip
+    }
   }
+  // Last resort: rely on PATH lookup
+  _resolvedPython = 'python3'
   return 'python3'
 }
 
@@ -44,35 +61,54 @@ export function getExt(filename: string): SupportedExt | null {
 
 // ---- PDF text extraction via PDF skill's extract.text ----
 export async function extractTextFromPDF(filePath: string): Promise<string> {
-  const { stdout } = await execFileAsync(
-    getPythonBin(),
-    [EXTRACT_TEXT, 'extract.text', filePath],
-    { timeout: 60000, maxBuffer: 20 * 1024 * 1024 }
-  )
-  const result = JSON.parse(stdout)
-  if (result.status !== 'success') {
-    throw new Error(result.message || 'PDF text extraction failed')
+  const pythonBin = getPythonBin()
+  try {
+    const { stdout } = await execFileAsync(
+      pythonBin,
+      [EXTRACT_TEXT, 'extract.text', filePath],
+      { timeout: 60000, maxBuffer: 20 * 1024 * 1024 }
+    )
+    const result = JSON.parse(stdout)
+    if (result.status !== 'success') {
+      throw new Error(result.message || 'PDF text extraction failed')
+    }
+    return (result.data.pages || []).map((p: { text: string }) => p.text).join('\n')
+  } catch (err) {
+    // Re-throw with a clearer message if the executable itself wasn't found
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/ENOENT|not found|spawn/i.test(msg)) {
+      throw new Error(`Python executable not available (${pythonBin}). Cannot extract PDF text.`)
+    }
+    throw err
   }
-  return (result.data.pages || []).map((p: { text: string }) => p.text).join('\n')
 }
 
 // ---- DOCX/XLSX → PDF → text via LibreOffice (convert.office) ----
 export async function extractTextFromOffice(filePath: string, ext: 'docx' | 'xlsx'): Promise<string> {
+  const pythonBin = getPythonBin()
   const outDir = path.dirname(filePath)
-  const { stdout } = await execFileAsync(
-    getPythonBin(),
-    [EXTRACT_TEXT, 'convert.office', filePath, '--output', outDir],
-    { timeout: 120000, maxBuffer: 20 * 1024 * 1024 }
-  )
-  const result = JSON.parse(stdout)
-  if (result.status !== 'success') {
-    throw new Error(result.message || `Office conversion failed for .${ext}`)
+  try {
+    const { stdout } = await execFileAsync(
+      pythonBin,
+      [EXTRACT_TEXT, 'convert.office', filePath, '--output', outDir],
+      { timeout: 120000, maxBuffer: 20 * 1024 * 1024 }
+    )
+    const result = JSON.parse(stdout)
+    if (result.status !== 'success') {
+      throw new Error(result.message || `Office conversion failed for .${ext}`)
+    }
+    const convertedPdf = result.data?.output || filePath.replace(/\.(docx|xlsx)$/i, '.pdf')
+    if (!existsSync(convertedPdf)) {
+      throw new Error(`Converted PDF not found: ${convertedPdf}`)
+    }
+    return extractTextFromPDF(convertedPdf)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/ENOENT|not found|spawn/i.test(msg)) {
+      throw new Error(`Python executable not available (${pythonBin}). Cannot convert .${ext} file.`)
+    }
+    throw err
   }
-  const convertedPdf = result.data?.output || filePath.replace(/\.(docx|xlsx)$/i, '.pdf')
-  if (!existsSync(convertedPdf)) {
-    throw new Error(`Converted PDF not found: ${convertedPdf}`)
-  }
-  return extractTextFromPDF(convertedPdf)
 }
 
 // ---- Wilayah extraction from text ----
