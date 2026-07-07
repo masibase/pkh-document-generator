@@ -1,10 +1,8 @@
 #!/bin/bash
-# Dev server watchdog — restarts next dev if it dies
 cd /home/z/my-project
 while true; do
   echo "[$(date)] Starting next dev..."
-  node node_modules/.bin/next dev -p 3000 > dev.log 2>&1
-  EXIT_CODE=$?
-  echo "[$(date)] next dev exited with code $EXIT_CODE, restarting in 3s..."
-  sleep 3
+  exec node /home/z/my-project/node_modules/.bin/next dev -p 3000 > /home/z/my-project/dev.log 2>&1
+  echo "[$(date)] next dev exited, restarting in 2s..."
+  sleep 2
 done

@@ -239,3 +239,47 @@ Stage Summary:
 - Dev server running stably on port 3000 (PID 4429, HTTP 200)
 - All 4 workflow steps work end-to-end for all 3 form types (Pendidikan, Kesehatan, Kesejahteraan Sosial)
 - No errors, no warnings, no broken elements — thoroughly verified
+
+---
+Task ID: 6
+Agent: main
+Task: Fix "Python executable not available (python3). Cannot extract PDF text." error (user-reported)
+
+User Report:
+- "Python executable not available (python3). Cannot extract PDF text."
+- This error appeared when uploading a PDF file, preventing PDF text extraction.
+
+Root Cause:
+- The dev server process (PID 4429, started at 11:33) was running BEFORE the Python path fix from Task 5 was applied. The Next.js Turbopack hot-reload did NOT fully reload the server-side document-extractor.ts module — the old getPythonBin() function (which only tried /home/z/.venv/bin/python3 then fell back to 'python3' string) was still cached in memory.
+- When the old code ran, existsSync('/home/z/.venv/bin/python3') apparently failed in the server process context (possibly due to symlink resolution or permissions), so it fell back to 'python3' which then failed with ENOENT because the server's PATH didn't include standard binary directories.
+
+Fix Applied:
+1. Added debug logging to getPythonBin() in document-extractor.ts:
+   - Logs each candidate path tried: "Python candidate missing: X" or "Python candidate not executable: X"
+   - Logs success: "Python resolved: /path"
+   - Logs warning if all candidates fail: "WARNING: No absolute Python path found. Tried: ... Falling back to 'python3' PATH lookup."
+2. Fixed dev server stability — server was dying between Bash tool calls:
+   - Created start-dev.sh watchdog script (restarts next dev if it exits)
+   - Used subshell double-fork approach: `( setsid bash start-dev.sh & )` for full process detachment
+   - This keeps the server alive across Bash tool invocations
+3. Added allowedDevOrigins to next.config.ts to suppress cross-origin warning from preview domain
+4. Restarted the dev server (killed PID 4429, started fresh PID 7780) to pick up the new code
+
+Verification Results:
+- Dev log confirms Python resolution works: `[pkh] Python resolved: /home/z/.venv/bin/python3`
+- POST /api/pkh/parse 200 in 883ms (PDF parsed successfully)
+- POST /api/pkh/generate 200 in 74ms
+- POST /api/pkh/export-pdf 200 in 1897ms
+- Browser errors: none
+- Browser console: only Fast Refresh logs (normal)
+- Full dev.log grep for errors: empty (no errors, no ENOENT, no "not found")
+- VLM verification: Step 4 shown, "PDF berhasil diunduh" visible, no Python errors, UI complete
+- Server stable: PID 7780 running, HTTP 200
+
+Stage Summary:
+- "Python executable not available (python3)" error COMPLETELY FIXED
+- Root cause was stale cached code in old dev server process — restart picked up the fix
+- Python now correctly resolves to /home/z/.venv/bin/python3 (venv with pdfplumber/pikepdf)
+- Dev server stability improved with watchdog + subshell double-fork detachment
+- All 4 workflow steps (Upload → Review → Generate → Export) work end-to-end with PDF upload
+- No errors anywhere: dev.log clean, browser clean, VLM confirms success

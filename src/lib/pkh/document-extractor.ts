@@ -29,20 +29,26 @@ const PYTHON_CANDIDATES = [
 let _resolvedPython: string | null = null
 function getPythonBin(): string {
   if (_resolvedPython) return _resolvedPython
+  const tried: string[] = []
   for (const candidate of PYTHON_CANDIDATES) {
+    tried.push(candidate)
     try {
       if (existsSync(candidate)) {
         // Verify it's actually executable
         accessSync(candidate, constants.X_OK)
         _resolvedPython = candidate
+        console.log(`[pkh] Python resolved: ${candidate}`)
         return candidate
+      } else {
+        console.log(`[pkh] Python candidate missing: ${candidate}`)
       }
-    } catch {
-      // exists but not executable — skip
+    } catch (e) {
+      console.log(`[pkh] Python candidate not executable: ${candidate} (${e instanceof Error ? e.message : 'unknown'})`)
     }
   }
   // Last resort: rely on PATH lookup
   _resolvedPython = 'python3'
+  console.warn(`[pkh] WARNING: No absolute Python path found. Tried: ${tried.join(', ')}. Falling back to 'python3' PATH lookup.`)
   return 'python3'
 }
 
