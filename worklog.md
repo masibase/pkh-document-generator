@@ -283,3 +283,94 @@ Stage Summary:
 - Dev server stability improved with watchdog + subshell double-fork detachment
 - All 4 workflow steps (Upload → Review → Generate → Export) work end-to-end with PDF upload
 - No errors anywhere: dev.log clean, browser clean, VLM confirms success
+
+---
+Task ID: 7
+Agent: main
+Task: Fix table column/row misalignment in both form generator and review step table (user reported "MASIH ADA KETIDAK SESUAIAN ANTARA KOLOM TABEL ATAUPUN BARIS")
+
+User Report:
+- CEK DAN KOREKSI SECARA DETAIL MASIH ADA KETIDAK SESUAIAN ANTARA KOLOM TABEL ATAUPUN BARIS. FIX KAN MASALAH INI. CEK MENYELURUH SEBELUM FINISH
+- (Check and correct in detail, there is still mismatch between table columns or rows. Fix this issue. Check thoroughly before finish)
+
+Root Cause Analysis — TWO distinct bugs found:
+
+BUG 1: Generated form table (form-generator.ts buildAttendanceTable)
+- THEAD Row 1 had 12 cells: 7 cells with rowspan=3 (No, NIK Pengurus, Nama Pengurus, NIK Siswa, NISN, Nama Siswa, Bentuk Pendidikan / Tingkat) + 3 month groups with colspan=7 (APRIL/MEI/JUNI = 21 cols) + 2 cells with rowspan=3 (Keterangan, Nama Pendamping) = 30 visual columns
+- THEAD Row 2 had 3 eff-day cells (colspan=7 each = 21 cols) PLUS 2 EXTRA empty <td rowspan="2"> cells. These 2 extra cells were REDUNDANT because Keterangan/Nama Pendamping already spanned all 3 rows via rowspan=3 in Row 1. The extra cells caused column overflow → table rendered as 32 columns instead of 30
+- THEAD Row 3 had 21 cells (HE/A/I/S/JML/%/✓ × 3 months) — correct
+- TBODY rows had 30 cells — correct
+- Net effect: header rows showed 32-col table while tbody showed 30 cols → visible misalignment
+
+BUG 2: Review step table (page.tsx RecordsTable)
+- Header Row 1: 6 ID cols + 3 months with colSpan={2} + Avg % = 13 visual cols (education) or 11 (health/social)
+- Header Row 2: colSpan={6} (or 4) + 3 months with colSpan={2} + empty = 13/11 visual cols
+- TBODY Row: 6 ID cells + 3 month cells (NO colSpan!) + Avg % = 10/8 visual cols ← MISMATCH
+- Each month tbody cell occupied only 1 column instead of 2, causing 3-column misalignment (Avg % appeared under JUN instead of its own column)
+
+Fixes Applied:
+
+Fix 1 (form-generator.ts lines 417-421):
+- Removed the 2 extra empty <td rowspan="2"> cells from THEAD Row 2
+- Now Row 2 only contains the 3 eff-day cells (colspan=7 each)
+- Cols 1-7 occupied by Row 1's rowspans (No..Bentuk Pendidikan / Tingkat)
+- Cols 8-28 occupied by eff-day cells
+- Cols 29-30 occupied by Row 1's rowspans (Keterangan, Nama Pendamping)
+- Total visual width per row: 30 columns ✓
+
+Fix 2 (page.tsx line 852):
+- Added colSpan={2} to each month <td> in RecordsTable tbody
+- Now month cells properly span 2 columns matching the month headers
+- Total visual width per row: 13 cols (education) or 11 cols (health/social) ✓
+
+Verification Results (3 form types × 2 tables = 6 checks):
+
+1. Education (PDF upload) — Review step table:
+   - Row 0 (header): 10 cells, visual=13 cols ✓
+   - Row 1 (subheader): 5 cells, visual=13 cols ✓
+   - Row 2 (tbody): 10 cells, visual=13 cols ✓
+
+2. Education (PDF upload) — Generated form table (iframe):
+   - Table width: 30 cols
+   - Row widths: [30, 30, 30, 30] (3 thead + 1 tbody) ✓
+   - Data: No=1, NIK Pengurus=3526024107900229, Nama Pengurus=SOFIYATUL, NIK Siswa=3526020412090003, NISN=0095992329, Nama Siswa=MOH. QORRIFARDAN, Bentuk/Tingkat=MA Kelas 10, APRIL=22/0/0/1/21/95%, MEI=20/0/0/0/20/100%, JUNI=22/0/1/0/21/95%, Keterangan=Hadir, Nama Pendamping=ABDUL BASRI
+
+3. Health (sample data) — Review step table:
+   - All 14 rows: width=11 cols ✓
+
+4. Health (sample data) — Generated form table (iframe):
+   - Table width: 30 cols
+   - Row widths: [30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30] (3 thead + 12 tbody) ✓
+   - First row: No=1, NIK Pengurus=327389102561840, Nama Pengurus=KHOIRUL ANAM, NIK Peserta=352672120760027, Nama Peserta=Maryam Salsa, Posyandu=Posyandu Kenang, Usia/BB-TB=10/95, APRIL=22/0/0/0/22/100%, MEI=22/0/0/0/22/100%, JUNI=22/0/2/0/20/91%, Keterangan=Hadir, Nama Pendamping=ABDUL BASRI
+
+5. Social (sample data) — Review step table:
+   - All 14 rows: width=11 cols ✓
+
+6. Social (sample data) — Generated form table (iframe):
+   - Table width: 30 cols
+   - Row widths: [30 × 15] (3 thead + 12 tbody) ✓
+   - First row: No=1, NIK=352685112772844, Nama=Sri Wahyuni, Alamat=Jl. Sangkuriang, Kelurahan=Dago, Jenis Bantuan=PKH Pendidikan, Jumlah=Rp 8.000.000 Aktif, APRIL=22/0/0/0/22/100%, MEI=22/0/1/1/20/91%, JUNI=22/1/0/0/21/95%, Keterangan=Hadir, Nama Pendamping=ABDUL BASRI
+
+VLM Verification (form screenshot, 4-point check):
+- (1) All rows aligned: PASS
+- (2) No misalignment/overflow/empty cols: PASS
+- (3) Data values align with column headers: PASS
+- (4) All data row values match source PDF: PASS
+
+Other checks:
+- Python resolved: /home/z/.venv/bin/python3 ✓
+- POST /api/pkh/parse 200 (PDF parsed successfully)
+- POST /api/pkh/generate 200 (all 3 form types)
+- POST /api/pkh/export-pdf 200 in 2.4s (PDF download successful, "PDF berhasil diunduh" toast shown)
+- ESLint: 0 errors, 0 warnings
+- Dev log: clean (no Python errors, no ENOENT, no crashes)
+- Browser console: no errors
+
+Stage Summary:
+- TWO table column/row misalignment bugs FIXED:
+  1. form-generator.ts: Removed 2 redundant empty <td rowspan="2"> cells in THEAD Row 2 (Keterangan/Nama Pendamping already had rowspan=3 from Row 1) — table now correctly 30 cols wide for all 3 form types
+  2. page.tsx: Added colSpan={2} to month <td> cells in RecordsTable tbody (was missing, caused 3-col shift) — Review table now correctly 13 cols (edu) / 11 cols (health/social)
+- All 6 verification scenarios (3 form types × 2 tables) pass with perfectly aligned rows
+- VLM confirms visual alignment + data fidelity to source PDF
+- Python executable issue resolved (was a stale dev server cache from previous session, restart fixed it)
+- All previous corrections remain intact: dark blue color scheme (no red), 70% transparent BSrE stamp, colorful replaceable logo, quarterly format matching uploaded PDF, single signature block, 7 SVG handwriting checkmark variations, Neural Engine Analysis removed

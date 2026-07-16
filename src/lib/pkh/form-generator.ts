@@ -416,8 +416,6 @@ function buildAttendanceTable(data: PKHFormData): string {
       </tr>
       <tr>
         ${buildEffDayRow(months, data.records)}
-        <td rowspan="2" style="background:#f1f5f9;"></td>
-        <td rowspan="2" style="background:#f1f5f9;"></td>
       </tr>
       <tr>
         ${buildSubHeaderRow(months)}

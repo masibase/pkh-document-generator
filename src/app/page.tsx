@@ -849,7 +849,7 @@ function RecordsTable({ data }: { data: PKHFormData }) {
               {isHealth && <td className="p-2 text-muted-foreground">{r.posyandu || '-'}</td>}
               {!isEdu && !isHealth && <td className="p-2 text-muted-foreground">{r.jenisBantuan || '-'}</td>}
               {r.bulan.map((m, j) => (
-                <td key={j} className="p-2 text-center">
+                <td key={j} className="p-2 text-center" colSpan={2}>
                   <div className="font-mono text-[10px]">{m.jml}/{m.hariEfektif}</div>
                   <div className={`text-[10px] font-semibold ${m.percent >= 75 ? 'text-green-600' : 'text-amber-600'}`}>{m.percent}%</div>
                 </td>
