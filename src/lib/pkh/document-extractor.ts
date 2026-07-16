@@ -89,6 +89,42 @@ export async function extractTextFromPDF(filePath: string): Promise<string> {
   }
 }
 
+// ---- PDF TABLE extraction via PDF skill's extract.table ----
+// Returns the actual table structure with column positions — far more accurate
+// than regex-parsing raw text. This is the GOLD STANDARD for parsing PKH PDFs
+// because we can auto-detect which column is which by reading header text.
+export interface PDFTable {
+  rows: number
+  cols: number
+  data: string[][]
+}
+export async function extractTableFromPDF(filePath: string): Promise<PDFTable[]> {
+  const pythonBin = getPythonBin()
+  try {
+    const { stdout } = await execFileAsync(
+      pythonBin,
+      [EXTRACT_TEXT, 'extract.table', filePath],
+      { timeout: 60000, maxBuffer: 20 * 1024 * 1024 }
+    )
+    const result = JSON.parse(stdout)
+    if (result.status !== 'success') {
+      return []
+    }
+    const tables: PDFTable[] = (result.data.tables || []).map((t: { rows: number; cols: number; data: string[][] }) => ({
+      rows: t.rows,
+      cols: t.cols,
+      data: t.data,
+    }))
+    return tables
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/ENOENT|not found|spawn/i.test(msg)) {
+      throw new Error(`Python executable not available (${pythonBin}). Cannot extract PDF table.`)
+    }
+    return []
+  }
+}
+
 // ---- DOCX/XLSX → PDF → text via LibreOffice (convert.office) ----
 export async function extractTextFromOffice(filePath: string, ext: 'docx' | 'xlsx'): Promise<string> {
   const pythonBin = getPythonBin()
@@ -566,6 +602,535 @@ export function parseRecordsFromText(
   return records
 }
 
+/* ============================================================
+   TABLE-BASED PDF PARSING (auto-detect columns & rows)
+   Uses pdfplumber's extract.table for accurate column positions.
+   This is the GOLD STANDARD — auto-detects which column is which
+   by reading the header text, then maps each data row's cells to
+   the correct form field. No more misplaced names/addresses.
+   ============================================================ */
+
+// Column header → form field mapping (auto-detect)
+// Each entry: regex to match header text → field key in PKHRecord
+type FieldKey =
+  | 'no' | 'nik' | 'nama' | 'nikPengurus' | 'namaPengurus'
+  | 'nisn' | 'tingkat' | 'bentukPendidikan'
+  | 'posyandu' | 'beratBadan' | 'tinggiBadan' | 'tanggalLahir' | 'jenisKelamin'
+  | 'alamat' | 'kelurahan' | 'kecamatan' | 'jenisBantuan' | 'jumlahBantuan' | 'status'
+  | 'keterangan' | 'namaPendamping'
+  // Attendance sub-fields (per-month, repeated 3×)
+  | 'hariEfektif' | 'alpa' | 'izin' | 'sakit' | 'jml' | 'percent'
+
+const IDENTITY_HEADER_MAP: { regex: RegExp; field: FieldKey }[] = [
+  // Identity / metadata columns — only matched against the TOP-LEVEL header row
+  { regex: /^\s*no\.?\s*$/i, field: 'no' },
+  { regex: /^\s*(?:nik\s+)?pengurus\s*$/i, field: 'nikPengurus' },
+  { regex: /^\s*nama\s+pengurus\s*$/i, field: 'namaPengurus' },
+  { regex: /^\s*nik\s+(?:siswa|peserta)\s*$/i, field: 'nik' },
+  { regex: /^\s*nik\s*$/i, field: 'nik' },
+  { regex: /^\s*nisn\s*$/i, field: 'nisn' },
+  { regex: /^\s*nama\s+(?:siswa|peserta)\s*$/i, field: 'nama' },
+  { regex: /^\s*nama\s*$/i, field: 'nama' },
+  { regex: /^\s*bentuk\s+pendidikan\s*$/i, field: 'bentukPendidikan' },
+  { regex: /^\s*tingkat\s*$/i, field: 'tingkat' },
+  { regex: /^\s*posyandu\s*$/i, field: 'posyandu' },
+  { regex: /^\s*(?:usia|umur)\s*$/i, field: 'beratBadan' }, // usia value goes here as fallback
+  { regex: /^\s*(?:bb|berat\s*badan)\s*[\/\-]?\s*(?:tb|tinggi\s*badan)?\s*$/i, field: 'beratBadan' },
+  { regex: /^\s*(?:tb|tinggi\s*badan)\s*$/i, field: 'tinggiBadan' },
+  { regex: /^\s*alamat\s*$/i, field: 'alamat' },
+  { regex: /^\s*(?:kelurahan|kel\.|desa)\s*$/i, field: 'kelurahan' },
+  { regex: /^\s*kecamatan\s*$/i, field: 'kecamatan' },
+  { regex: /^\s*jenis\s+bantuan\s*$/i, field: 'jenisBantuan' },
+  { regex: /^\s*(?:jumlah|nominal)\s+bantuan\s*$/i, field: 'jumlahBantuan' },
+  { regex: /^\s*status\s*$/i, field: 'status' },
+  { regex: /^\s*keterangan\s*$/i, field: 'keterangan' },
+  { regex: /^\s*(?:nama\s+)?pendamping\s*$/i, field: 'namaPendamping' },
+]
+
+const ATTENDANCE_HEADER_MAP: { regex: RegExp; field: FieldKey }[] = [
+  // Attendance sub-headers — only matched against sub-header rows
+  { regex: /^\s*alpa\s*$/i, field: 'alpa' },
+  { regex: /^\s*izin\s*$/i, field: 'izin' },
+  { regex: /^\s*sakit\s*$/i, field: 'sakit' },
+  { regex: /^\s*jml\s*$/i, field: 'jml' },
+  { regex: /^\s*%\s*$/i, field: 'percent' },
+  { regex: /^\s*hari\s+efektif\s*$/i, field: 'hariEfektif' },
+]
+
+// Month names (Indonesian + English) for detecting month-group header cells
+const MONTH_NAMES = [
+  'januari', 'februari', 'maret', 'april', 'mei', 'juni',
+  'juli', 'agustus', 'september', 'oktober', 'november', 'desember',
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december',
+]
+
+// Detect a month header cell — may also embed "Hari Efektif : N"
+function detectMonthHeader(cell: string): { month: string; hariEfektif: number | null } | null {
+  if (!cell) return null
+  const lower = cell.toLowerCase().replace(/\s+/g, ' ').trim()
+  // Find month name
+  let month: string | null = null
+  for (const m of MONTH_NAMES) {
+    const re = new RegExp(`\\b${m}\\b`, 'i')
+    if (re.test(lower)) {
+      month = m.charAt(0).toUpperCase() + m.slice(1)
+      // Normalize Indonesian
+      if (m === 'may') month = 'Mei'
+      break
+    }
+  }
+  if (!month) return null
+  // Look for "Hari Efektif : N" embedded in the same cell
+  const heMatch = cell.match(/hari\s*efektif\s*[:\-]?\s*(\d{1,2})/i)
+  const hariEfektif = heMatch ? parseInt(heMatch[1], 10) : null
+  return { month, hariEfektif }
+}
+
+// Build column-index → field-key mapping. Returns SEPARATE maps for
+// identity columns (NIK, Nama, etc.) and attendance sub-fields
+// (ALPA/IZIN/SAKIT/JML/%), so a column can be BOTH "nikPengurus"
+// (identity) AND "alpa" (attendance) without overwriting each other.
+interface TableColumnMap {
+  // Identity column mapping (colIndex → field) — from top-level header row
+  identityCols: Map<number, FieldKey>
+  // Attendance column mapping (colIndex → field) — from sub-header row
+  attendanceCols: Map<number, FieldKey>
+  // Attendance column → month name (which month this col belongs to)
+  colMonth: Map<number, string>
+  // Month name → hariEfektif (from "Hari Efektif : N" embedded in month header)
+  monthHariEfektif: Map<string, number>
+  // Row indices that contain IDENTITY data (NIK + name)
+  identityRowIdx: number[]
+  // Row indices that contain ATTENDANCE data (small numbers, no NIK)
+  attendanceRowIdx: number[]
+  // Detected month names in order
+  detectedMonths: string[]
+}
+
+function buildColumnMap(table: PDFTable): TableColumnMap | null {
+  const identityCols = new Map<number, FieldKey>()
+  const attendanceCols = new Map<number, FieldKey>()
+  const colMonth = new Map<number, string>()
+  const monthHariEfektif = new Map<string, number>()
+  const detectedMonths: string[] = []
+  const identityRowIdx: number[] = []
+  const attendanceRowIdx: number[] = []
+
+  // First pass: identify which row is the "top-level identity header"
+  // (contains "No" or "NIK Pengurus" or "Nama") — that row gives us identity cols.
+  // Then identify "month-group header" rows (contain month names) and
+  // "attendance sub-header" rows (contain ALPA/IZIN/SAKIT/JML/%).
+  let identityHeaderRowIdx = -1
+  const monthHeaderRowIdx: number[] = []
+  const subHeaderRowIdx: number[] = []
+  // Track ALL rows that contain identity column headers (a single row may
+  // contain BOTH month groups AND identity columns like "Keterangan"/"Nama
+  // Pendamping" — we need to scan those too).
+  const identityHeaderRows: number[] = []
+
+  for (let ri = 0; ri < table.data.length; ri++) {
+    const row = table.data[ri]
+    if (!row) continue
+    let isIdentityHeader = false
+    let hasMonth = false
+    let hasSubHeader = false
+    for (const cell of row) {
+      if (!cell) continue
+      const normalized = cell.replace(/\s+/g, ' ').trim()
+      if (/^\s*no\.?\s*$/i.test(normalized) || /nama\s+pengurus/i.test(normalized) || /nik\s+pengurus/i.test(normalized)) {
+        isIdentityHeader = true
+      }
+      // Also detect Keterangan / Nama Pendamping / Alamat / Status etc. as identity headers
+      for (const { regex } of IDENTITY_HEADER_MAP) {
+        if (regex.test(normalized)) {
+          isIdentityHeader = true
+          break
+        }
+      }
+      if (detectMonthHeader(normalized)) hasMonth = true
+      if (/^(alpa|izin|sakit|jml|%)$/i.test(normalized)) hasSubHeader = true
+    }
+    if (isIdentityHeader) {
+      if (identityHeaderRowIdx === -1) identityHeaderRowIdx = ri
+      identityHeaderRows.push(ri)
+    }
+    if (hasMonth) monthHeaderRowIdx.push(ri)
+    if (hasSubHeader) subHeaderRowIdx.push(ri)
+  }
+
+  // Build identity column map from ALL identity header rows (a column can
+  // appear in any header row — e.g., "Keterangan" may be in the same row as
+  // month groups). Only set a mapping if not already set (first match wins,
+  // which is usually the top-level header row).
+  for (const ri of identityHeaderRows) {
+    const row = table.data[ri]
+    for (let ci = 0; ci < row.length; ci++) {
+      if (identityCols.has(ci)) continue // already mapped — skip
+      const cell = (row[ci] || '').replace(/\s+/g, ' ').trim()
+      if (!cell) continue
+      for (const { regex, field } of IDENTITY_HEADER_MAP) {
+        if (regex.test(cell)) {
+          identityCols.set(ci, field)
+          break
+        }
+      }
+    }
+  }
+
+  // Build attendance column map from month-group + sub-header rows.
+  // The month-group row tells us which columns belong to which month
+  // (a month cell spans multiple subsequent empty columns until the next
+  // non-empty cell). The sub-header row tells us which field each column is.
+  const colToMonth: Map<number, string> = new Map()
+  for (const ri of monthHeaderRowIdx) {
+    const row = table.data[ri]
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = (row[ci] || '').trim()
+      if (!cell) continue
+      const monthInfo = detectMonthHeader(cell)
+      if (monthInfo) {
+        if (!detectedMonths.includes(monthInfo.month)) {
+          detectedMonths.push(monthInfo.month)
+        }
+        if (monthInfo.hariEfektif) {
+          monthHariEfektif.set(monthInfo.month, monthInfo.hariEfektif)
+        }
+        // Mark this column and subsequent empty columns as belonging to this month
+        colToMonth.set(ci, monthInfo.month)
+        for (let cj = ci + 1; cj < row.length; cj++) {
+          if ((row[cj] || '').trim()) break
+          colToMonth.set(cj, monthInfo.month)
+        }
+      }
+    }
+  }
+  for (const ri of subHeaderRowIdx) {
+    const row = table.data[ri]
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = (row[ci] || '').replace(/\s+/g, ' ').trim()
+      if (!cell) continue
+      for (const { regex, field } of ATTENDANCE_HEADER_MAP) {
+        if (regex.test(cell)) {
+          attendanceCols.set(ci, field)
+          const m = colToMonth.get(ci)
+          if (m) colMonth.set(ci, m)
+          break
+        }
+      }
+    }
+  }
+
+  // Second pass: classify each remaining row as identity data (has NIK) or
+  // attendance data (has small numbers, no NIK, no header text)
+  const headerRowSet = new Set<number>([identityHeaderRowIdx, ...monthHeaderRowIdx, ...subHeaderRowIdx])
+  for (let ri = 0; ri < table.data.length; ri++) {
+    if (headerRowSet.has(ri)) continue
+    const row = table.data[ri]
+    if (!row) continue
+    let hasNik = false
+    let hasHeaderText = false
+    let hasSmallNumber = false
+    let nonEmptyCount = 0
+    for (const cell of row) {
+      if (!cell || !cell.trim()) continue
+      nonEmptyCount++
+      if (/\b\d{14,18}\b/.test(cell)) hasNik = true
+      if (/^(no|nik|nama|nisn|posyandu|alamat|kelurahan|kecamatan|keterangan|pendamping|alpa|izin|sakit|jml|bentuk|tingkat|status|jenis|jumlah|hari\s*efektif|total|catatan|mengetahui|kepala|nip)/i.test(cell.trim())) {
+        hasHeaderText = true
+      }
+      // Small numbers (0-31) are attendance values
+      const n = parseInt(cell.trim(), 10)
+      if (!isNaN(n) && n >= 0 && n <= 31 && cell.trim().length <= 4) hasSmallNumber = true
+    }
+    if (nonEmptyCount === 0) continue
+    if (hasHeaderText) continue
+    if (hasNik) {
+      identityRowIdx.push(ri)
+    } else if (hasSmallNumber) {
+      attendanceRowIdx.push(ri)
+    }
+  }
+
+  if (identityRowIdx.length === 0 && attendanceRowIdx.length === 0) return null
+
+  return {
+    identityCols,
+    attendanceCols,
+    colMonth,
+    monthHariEfektif,
+    identityRowIdx,
+    attendanceRowIdx,
+    detectedMonths,
+  }
+}
+
+// Parse records from a PDF table using the auto-detected column map.
+// IDENTITY rows (with NIK + name) create new records.
+// ATTENDANCE rows (with small numbers) add bulan[] data to the most
+// recent record, matched by row order.
+export function parseRecordsFromTable(
+  table: PDFTable,
+  colMap: TableColumnMap,
+  months: string[],
+  hariEfektifDefault: number
+): PKHRecord[] {
+  const records: PKHRecord[] = []
+  let attendanceCounter = 0 // tracks which record the next attendance row belongs to
+
+  // Process rows in order. Identity rows create new records; attendance rows
+  // add to the most recent record. This handles PDFs where identity data and
+  // attendance data are in SEPARATE rows (which is the case for PKH PDFs).
+  const allRowIdx = [...colMap.identityRowIdx, ...colMap.attendanceRowIdx].sort((a, b) => a - b)
+
+  for (const ri of allRowIdx) {
+    const row = table.data[ri]
+    if (!row) continue
+
+    // Skip completely empty rows
+    let hasAnyData = false
+    for (const cell of row) {
+      if (cell && cell.trim()) { hasAnyData = true; break }
+    }
+    if (!hasAnyData) continue
+
+    // Skip footer rows
+    const rowText = row.filter((c) => c && c.trim()).join(' ')
+    if (/^(total|jumlah\s+akhir|catatan|mengetahui|kepala|nip|dokumen|form\s+verifikasi)/i.test(rowText.trim())) continue
+
+    const isIdentityRow = colMap.identityRowIdx.includes(ri)
+
+    if (isIdentityRow) {
+      // Parse as identity row — create a new record
+      const record: PKHRecord = {
+        no: records.length + 1,
+        nama: '',
+        nik: '',
+        bulan: [],
+        keterangan: 'Hadir',
+        namaPendamping: '',
+      }
+
+      for (let ci = 0; ci < row.length; ci++) {
+        const field = colMap.identityCols.get(ci)
+        if (!field) continue
+        const rawValue = (row[ci] || '').trim()
+        if (!rawValue) continue
+
+        switch (field) {
+          case 'no': {
+            const n = parseInt(rawValue, 10)
+            if (!isNaN(n)) record.no = n
+            break
+          }
+          case 'nik':
+            record.nik = rawValue.replace(/\D/g, '').substring(0, 18)
+            break
+          case 'nikPengurus':
+            record.nikPengurus = rawValue.replace(/\D/g, '').substring(0, 18)
+            break
+          case 'nama':
+            record.nama = rawValue.replace(/\s+/g, ' ').substring(0, 80)
+            break
+          case 'namaPengurus':
+            record.namaPengurus = rawValue.replace(/\s+/g, ' ').substring(0, 80)
+            break
+          case 'nisn':
+            record.nisn = rawValue.replace(/\D/g, '').substring(0, 10)
+            break
+          case 'tingkat':
+            record.tingkat = rawValue.replace(/\s+/g, ' ').substring(0, 30)
+            break
+          case 'bentukPendidikan':
+            record.bentukPendidikan = rawValue.replace(/\s+/g, ' ').substring(0, 20)
+            break
+          case 'posyandu':
+            record.posyandu = rawValue.replace(/\s+/g, ' ').substring(0, 60)
+            break
+          case 'beratBadan':
+            if (rawValue.includes('/')) {
+              const [bb, tb] = rawValue.split('/')
+              record.beratBadan = bb.trim()
+              record.tinggiBadan = tb.trim()
+            } else {
+              record.beratBadan = rawValue
+            }
+            break
+          case 'tinggiBadan':
+            record.tinggiBadan = rawValue
+            break
+          case 'tanggalLahir':
+            record.tanggalLahir = rawValue
+            break
+          case 'jenisKelamin':
+            record.jenisKelamin = rawValue.substring(0, 1)
+            break
+          case 'alamat':
+            record.alamat = rawValue.replace(/\s+/g, ' ').substring(0, 120)
+            break
+          case 'kelurahan':
+            record.kelurahan = rawValue.replace(/\s+/g, ' ').substring(0, 60)
+            break
+          case 'kecamatan':
+            record.kecamatan = rawValue.replace(/\s+/g, ' ').substring(0, 60)
+            break
+          case 'jenisBantuan':
+            record.jenisBantuan = rawValue.replace(/\s+/g, ' ').substring(0, 40)
+            break
+          case 'jumlahBantuan':
+            record.jumlahBantuan = rawValue.replace(/\s+/g, ' ').substring(0, 40)
+            break
+          case 'status':
+            record.status = rawValue.replace(/\s+/g, ' ').substring(0, 20)
+            break
+          case 'keterangan':
+            record.keterangan = rawValue.replace(/\s+/g, ' ').substring(0, 30)
+            break
+          case 'namaPendamping':
+            record.namaPendamping = rawValue.replace(/\s+/g, ' ').substring(0, 60)
+            break
+        }
+      }
+
+      // Skip if no NIK and no name (not a real identity row)
+      if (!record.nik && !record.nama) continue
+
+      records.push(record)
+      attendanceCounter = records.length - 1 // next attendance row belongs to this record
+    } else {
+      // Parse as attendance row — add bulan[] data to the most recent record
+      // (or to the record matching attendanceCounter)
+      // ALSO extract any identity-column values that appear in this row
+      // (e.g., "Keterangan" and "Nama Pendamping" often appear in the
+      // attendance row, not the identity row, in PKH PDFs).
+      const targetRecord = records[attendanceCounter]
+      if (!targetRecord) continue
+
+      // Per-month attendance values collected from this row
+      const monthAtt: Record<string, Partial<MonthAttendance>> = {}
+
+      for (let ci = 0; ci < row.length; ci++) {
+        const rawValue = (row[ci] || '').trim()
+        if (!rawValue) continue
+
+        // Check attendance columns first
+        const attField = colMap.attendanceCols.get(ci)
+        if (attField) {
+          const month = colMap.colMonth.get(ci)
+          if (!month) continue
+
+          switch (attField) {
+            case 'hariEfektif': {
+              const v = parseInt(rawValue.replace(/\D/g, ''), 10)
+              if (!isNaN(v)) {
+                monthAtt[month] = { ...(monthAtt[month] || {}), nama: month, hariEfektif: v }
+              }
+              break
+            }
+            case 'alpa':
+            case 'izin':
+            case 'sakit':
+            case 'jml':
+            case 'percent': {
+              let v: number
+              if (attField === 'percent') {
+                v = parseInt(rawValue.replace(/[^\d]/g, ''), 10)
+              } else {
+                v = parseInt(rawValue, 10)
+              }
+              if (!isNaN(v)) {
+                monthAtt[month] = { ...(monthAtt[month] || {}), nama: month, [attField]: v }
+              }
+              break
+            }
+          }
+          continue
+        }
+
+        // Also check identity columns — values like "Keterangan" (Hadir) and
+        // "Nama Pendamping" (ABDUL BASRI) often appear in the attendance row.
+        const idField = colMap.identityCols.get(ci)
+        if (idField) {
+          switch (idField) {
+            case 'keterangan':
+              targetRecord.keterangan = rawValue.replace(/\s+/g, ' ').substring(0, 30)
+              break
+            case 'namaPendamping':
+              targetRecord.namaPendamping = rawValue.replace(/\s+/g, ' ').substring(0, 60)
+              break
+            case 'status':
+              targetRecord.status = rawValue.replace(/\s+/g, ' ').substring(0, 20)
+              break
+            case 'alamat':
+              if (!targetRecord.alamat) targetRecord.alamat = rawValue.replace(/\s+/g, ' ').substring(0, 120)
+              break
+            case 'kelurahan':
+              if (!targetRecord.kelurahan) targetRecord.kelurahan = rawValue.replace(/\s+/g, ' ').substring(0, 60)
+              break
+            case 'jenisBantuan':
+              if (!targetRecord.jenisBantuan) targetRecord.jenisBantuan = rawValue.replace(/\s+/g, ' ').substring(0, 40)
+              break
+            case 'jumlahBantuan':
+              if (!targetRecord.jumlahBantuan) targetRecord.jumlahBantuan = rawValue.replace(/\s+/g, ' ').substring(0, 40)
+              break
+          }
+        }
+      }
+
+      // Merge monthAtt into targetRecord.bulan
+      // If bulan is empty, initialize it with all months
+      if (targetRecord.bulan.length === 0) {
+        const monthOrder = colMap.detectedMonths.length === 3 ? colMap.detectedMonths : months
+        targetRecord.bulan = monthOrder.map((m) => {
+          const att = monthAtt[m] || {}
+          const he = att.hariEfektif ?? colMap.monthHariEfektif.get(m) ?? hariEfektifDefault
+          const alpa = att.alpa ?? 0
+          const izin = att.izin ?? 0
+          const sakit = att.sakit ?? 0
+          const jml = att.jml ?? Math.max(0, he - alpa - izin - sakit)
+          const percent = att.percent ?? (he > 0 ? Math.round((jml / he) * 100) : 0)
+          return { nama: m, hariEfektif: he, alpa, izin, sakit, jml, percent }
+        })
+      } else {
+        // Merge: update existing bulan entries with new values
+        for (const m of Object.keys(monthAtt)) {
+          const att = monthAtt[m] || {}
+          const existing = targetRecord.bulan.find((b) => b.nama === m)
+          if (existing) {
+            if (att.hariEfektif !== undefined) existing.hariEfektif = att.hariEfektif
+            if (att.alpa !== undefined) existing.alpa = att.alpa
+            if (att.izin !== undefined) existing.izin = att.izin
+            if (att.sakit !== undefined) existing.sakit = att.sakit
+            if (att.jml !== undefined) existing.jml = att.jml
+            if (att.percent !== undefined) existing.percent = att.percent
+          } else {
+            // Add new month entry
+            const he = att.hariEfektif ?? colMap.monthHariEfektif.get(m) ?? hariEfektifDefault
+            const alpa = att.alpa ?? 0
+            const izin = att.izin ?? 0
+            const sakit = att.sakit ?? 0
+            const jml = att.jml ?? Math.max(0, he - alpa - izin - sakit)
+            const percent = att.percent ?? (he > 0 ? Math.round((jml / he) * 100) : 0)
+            targetRecord.bulan.push({ nama: m, hariEfektif: he, alpa, izin, sakit, jml, percent })
+          }
+        }
+      }
+    }
+  }
+
+  // Post-process: compute keterangan from average percent if not explicitly set
+  for (const record of records) {
+    if (record.bulan.length > 0) {
+      const avgPct = Math.round(record.bulan.reduce((s, m) => s + m.percent, 0) / record.bulan.length)
+      if (!record.keterangan || record.keterangan === 'Hadir') {
+        record.keterangan = avgPct >= 75 ? 'Hadir' : 'Tidak Hadir'
+      }
+    }
+  }
+
+  return records
+}
+
 // ---- Main entry: extract data from any supported file type ----
 export async function extractFromDocument(
   fileBuffer: Buffer,
@@ -608,6 +1173,87 @@ export async function extractFromDocument(
       await writeFile(tmpPath, fileBuffer)
       try {
         text = await extractTextFromPDF(tmpPath)
+
+        // === TABLE-BASED PDF PARSING (primary method) ===
+        // pdfplumber's extract.table gives accurate column positions, so we
+        // can AUTO-DETECT which column is which by reading header text.
+        // This is far more reliable than regex on raw text — no more
+        // misplaced names/addresses. Falls back to text parsing if no
+        // table is found or parsing yields no records.
+        let tableRecords: PKHRecord[] = []
+        let tableMonths: string[] | null = null
+        try {
+          const tables = await extractTableFromPDF(tmpPath)
+          if (tables.length > 0) {
+            // Pick the largest table (most cells) — usually the main attendance table
+            const mainTable = tables.reduce((best, t) =>
+              (t.rows * t.cols) > (best.rows * best.cols) ? t : best, tables[0])
+            const colMap = buildColumnMap(mainTable)
+            if (colMap) {
+              // Pre-detect form type from text first so we know what fields to expect
+              formType = detectFormTypeFromText(text)
+              const triwulanT = wilayah.triwulan || extractWilayahFromText(text).triwulan || 2
+              const monthsT = TRIWULAN_MONTHS[triwulanT] || TRIWULAN_MONTHS[2]
+              // If table headers revealed month names, use those (in order detected)
+              tableMonths = colMap.detectedMonths.length === 3 ? colMap.detectedMonths : null
+              tableRecords = parseRecordsFromTable(
+                mainTable,
+                colMap,
+                tableMonths || monthsT,
+                DEFAULT_HARI_EFEKTIF
+              )
+            }
+          }
+        } catch (tableErr) {
+          // Table extraction failed — fall through to text parsing
+          console.warn('[pkh] Table extraction failed, falling back to text parsing:', tableErr instanceof Error ? tableErr.message : tableErr)
+        }
+
+        // If table parsing succeeded, use those records (they're more accurate)
+        if (tableRecords.length > 0) {
+          records = tableRecords
+          // Re-extract wilayah from text (already done above but be explicit)
+          wilayah = extractWilayahFromText(text)
+          formType = detectFormTypeFromText(text)
+
+          const triwulanF = wilayah.triwulan || 2
+          const monthsF = tableMonths || TRIWULAN_MONTHS[triwulanF] || TRIWULAN_MONTHS[2]
+          const hariEfektifF = DEFAULT_HARI_EFEKTIF
+
+          // Build detectedColumns from the actual table headers
+          detectedColumns = extractColumnHints(text, formType)
+
+          const facilitatorFromAtt = records.find((r) => r.namaPendamping)?.namaPendamping || ''
+          const data: PKHFormData = {
+            formType,
+            periode: wilayah.periode || `TRIWULAN ${triwulanF} TAHUN ${wilayah.tahun || new Date().getFullYear()}`,
+            triwulan: triwulanF,
+            tahun: wilayah.tahun || new Date().getFullYear(),
+            provinsi: wilayah.provinsi || '',
+            kabupaten: wilayah.kabupaten || '',
+            kecamatan: wilayah.kecamatan || '',
+            kelurahan: wilayah.kelurahan || '',
+            npsn: wilayah.npsn || '',
+            namaSekolah: wilayah.namaSekolah || '',
+            alamatSekolah: wilayah.alamatSekolah || '',
+            signerName: wilayah.signerName || '',
+            signerNIP: wilayah.signerNIP || '',
+            signerRole: wilayah.signerRole || (formType === 'education' ? 'Kepala Sekolah' : 'Kepala Desa'),
+            facilitator: wilayah.facilitator || facilitatorFromAtt || '',
+            nipFacilitator: wilayah.nipFacilitator || '',
+            records,
+            months: monthsF,
+          }
+
+          return {
+            success: true,
+            formType,
+            data,
+            detectedColumns,
+            totalRecords: records.length,
+            sourceType: 'pdf-table',
+          }
+        }
       } finally {
         await unlink(tmpPath).catch(() => {})
       }

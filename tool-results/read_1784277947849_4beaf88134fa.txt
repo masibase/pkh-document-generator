@@ -416,200 +416,198 @@
    416→      </tr>
    417→      <tr>
    418→        ${buildEffDayRow(months, data.records)}
-   419→        <td rowspan="2" style="background:#f1f5f9;"></td>
-   420→        <td rowspan="2" style="background:#f1f5f9;"></td>
-   421→      </tr>
-   422→      <tr>
-   423→        ${buildSubHeaderRow(months)}
-   424→      </tr>
-   425→    </thead>
-   426→    <tbody>
-   427→      ${rows}
-   428→    </tbody>
-   429→  </table>`
-   430→}
-   431→
-   432→/* ============================================================
-   433→   Calculate summary statistics (random avg 90-100%)
-   434→   ============================================================ */
-   435→function calcSummary(data: PKHFormData) {
-   436→  const total = data.records.length
-   437→  let avgAttendance = 0
-   438→  if (data.records.length > 0) {
-   439→    const allPercents = data.records.flatMap((r) => r.bulan.map((m) => m.percent))
-   440→    avgAttendance = Math.round(
-   441→      allPercents.reduce((a, b) => a + b, 0) / (allPercents.length || 1)
-   442→    )
-   443→  }
-   444→  return { total, avgAttendance }
-   445→}
-   446→
-   447→/* ============================================================
-   448→   Build complete HTML for a single form
-   449→   ============================================================ */
-   450→export function generateFormHTML(data: PKHFormData): string {
-   451→  const title = FORM_TYPE_TITLES[data.formType]
-   452→  const subtitle = FORM_TYPE_SUBTITLES[data.formType]
-   453→  const label = FORM_TYPE_LABELS[data.formType]
-   454→  const { total, avgAttendance } = calcSummary(data)
+   419→      </tr>
+   420→      <tr>
+   421→        ${buildSubHeaderRow(months)}
+   422→      </tr>
+   423→    </thead>
+   424→    <tbody>
+   425→      ${rows}
+   426→    </tbody>
+   427→  </table>`
+   428→}
+   429→
+   430→/* ============================================================
+   431→   Calculate summary statistics (random avg 90-100%)
+   432→   ============================================================ */
+   433→function calcSummary(data: PKHFormData) {
+   434→  const total = data.records.length
+   435→  let avgAttendance = 0
+   436→  if (data.records.length > 0) {
+   437→    const allPercents = data.records.flatMap((r) => r.bulan.map((m) => m.percent))
+   438→    avgAttendance = Math.round(
+   439→      allPercents.reduce((a, b) => a + b, 0) / (allPercents.length || 1)
+   440→    )
+   441→  }
+   442→  return { total, avgAttendance }
+   443→}
+   444→
+   445→/* ============================================================
+   446→   Build complete HTML for a single form
+   447→   ============================================================ */
+   448→export function generateFormHTML(data: PKHFormData): string {
+   449→  const title = FORM_TYPE_TITLES[data.formType]
+   450→  const subtitle = FORM_TYPE_SUBTITLES[data.formType]
+   451→  const label = FORM_TYPE_LABELS[data.formType]
+   452→  const { total, avgAttendance } = calcSummary(data)
+   453→
+   454→  const tableHTML = buildAttendanceTable(data)
    455→
-   456→  const tableHTML = buildAttendanceTable(data)
-   457→
-   458→  // Identity info block (form-type specific)
-   459→  let identityHTML: string
-   460→  if (data.formType === 'education') {
-   461→    identityHTML = `
-   462→    <div class="school-info">
-   463→      <div class="inline-row">
-   464→        <div class="item"><span class="label">NPSN</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
-   465→        <div class="item"><span class="label">Nama Sekolah</span><span class="sep">:</span><span>${data.namaSekolah || '-'}</span></div>
-   466→      </div>
-   467→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
-   468→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
-   469→    </div>`
-   470→  } else if (data.formType === 'health') {
-   471→    identityHTML = `
-   472→    <div class="school-info">
-   473→      <div class="inline-row">
-   474→        <div class="item"><span class="label">Posyandu</span><span class="sep">:</span><span>${data.namaSekolah || '-'}</span></div>
-   475→        <div class="item"><span class="label">Kode Wilayah</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
-   476→      </div>
-   477→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
-   478→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
-   479→    </div>`
-   480→  } else {
-   481→    identityHTML = `
-   482→    <div class="school-info">
-   483→      <div class="inline-row">
-   484→        <div class="item"><span class="label">Wilayah Layanan</span><span class="sep">:</span><span>${data.namaSekolah || data.kelurahan || '-'}</span></div>
-   485→        <div class="item"><span class="label">Kode</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
-   486→      </div>
-   487→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
-   488→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
-   489→    </div>`
-   490→  }
-   491→
-   492→  const summaryHTML = `
-   493→    <div class="summary-row">
-   494→      <div class="summary-card"><div class="label">Total ${data.formType === 'education' ? 'Siswa' : 'Peserta'}</div><div class="value">${total}</div></div>
-   495→      <div class="summary-card"><div class="label">Rata-rata Kehadiran</div><div class="value">${avgAttendance}%</div></div>
-   496→      <div class="summary-card"><div class="label">Periode</div><div class="value" style="font-size:10px;">${data.periode}</div></div>
-   497→      <div class="summary-card"><div class="label">Kategori</div><div class="value" style="font-size:11px;">${label}</div></div>
-   498→    </div>`
-   499→
-   500→  const legendHTML = `
-   501→    <div class="legend">
-   502→      <div class="legend-item"><span class="check-mark">${checkSVG(0)}</span> Hadir/Terlayani (≥75%)</div>
-   503→      <div class="legend-item"><span style="display:inline-block;width:15px;color:#94a3b8;font-size:13px;">—</span> Tidak Hadir (&lt;75%)</div>
-   504→      <div class="legend-item"><strong>HE</strong> = Hari Efektif</div>
-   505→      <div class="legend-item"><strong>A</strong> = Alpa</div>
-   506→      <div class="legend-item"><strong>I</strong> = Izin</div>
-   507→      <div class="legend-item"><strong>S</strong> = Sakit</div>
-   508→      <div class="legend-item"><strong>JML</strong> = HE − A − I − S</div>
-   509→      <div class="legend-item"><strong>%</strong> = (JML ÷ HE) × 100</div>
-   510→    </div>`
-   511→
-   512→  const today = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
-   513→  const placeDate = `${data.kelurahan || data.kecamatan || ''}${data.kelurahan ? ', ' : ''}${today}`
-   514→
-   515→  return `<!DOCTYPE html>
-   516→<html lang="id">
-   517→<head>
-   518→  <meta charset="UTF-8" />
-   519→  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-   520→  <title>${title} - PKH</title>
-   521→  ${formCSS()}
-   522→</head>
-   523→<body>
-   524→  <div class="page">
-   525→    <div class="form-header">
-   526→      <div class="header-left">
-   527→        ${kemsosLogo(data.logoUrl)}
-   528→        <div class="header-title">
-   529→          <h1>${title}</h1>
-   530→          <h2>${subtitle}</h2>
-   531→          <div class="subtitle">PERIODE: ${data.periode}</div>
-   532→        </div>
-   533→      </div>
-   534→      <div class="header-right">
-   535→        <div class="doc-id">PKH-${data.formType.toUpperCase().slice(0, 3)}-${data.tahun || new Date().getFullYear()}</div>
-   536→        <div>Triwulan ${data.triwulan || ''}</div>
-   537→        <div style="color:#1e3a5f;font-weight:bold;margin-top:3px;">☑ Disahkan dengan BSrE</div>
-   538→      </div>
-   539→    </div>
-   540→
-   541→    ${identityHTML}
-   542→    ${summaryHTML}
-   543→    ${tableHTML}
-   544→    ${legendHTML}
-   545→
-   546→    <div class="note-box">
-   547→      <strong>Catatan:</strong>
-   548→      <ul>
-   549→        <li><strong>JML</strong> = Hari Efektif − Alpa − Izin − Sakit</li>
-   550→        <li><strong>%</strong> = (JML ÷ Hari Efektif) × 100</li>
-   551→        <li>Verifikasi kehadiran telah dilakukan oleh Pendamping PKH</li>
-   552→      </ul>
-   553→    </div>
-   554→
-   555→    <div class="form-footer">
-   556→      <div class="signature-area">
-   557→        <div class="place-date">${placeDate}</div>
-   558→        <div class="role-label">Mengetahui,<br/>${data.signerRole}</div>
-   559→        ${signatureBlock(data.signerName, data.signerNIP, data.signerRole)}
-   560→      </div>
-   561→    </div>
-   562→
-   563→    <div class="bsre-note">
-   564→      Dokumen ini telah diverifikasi dan ditandatangani secara elektronik menggunakan sertifikat
-   565→      <strong>BSrE (Badan Siber dan Sandi Negara)</strong>.<br/>
-   566→      Status keaslian dapat diverifikasi melalui <strong>validasi.bsre.bssn.go.id</strong>
-   567→    </div>
-   568→  </div>
-   569→</body>
-   570→</html>`
-   571→}
-   572→
-   573→/* ============================================================
-   574→   Build combined HTML document (multiple forms with page breaks)
-   575→   ============================================================ */
-   576→export function generateCombinedHTML(forms: PKHFormData[]): string {
-   577→  const pages = forms
-   578→    .map((f) => `<div class="page-break">${generateFormBody(f)}</div>`)
-   579→    .join('')
-   580→
-   581→  return `<!DOCTYPE html>
-   582→<html lang="id">
-   583→<head>
-   584→  <meta charset="UTF-8" />
-   585→  <title>Dokumen Gabungan PKH - Kementerian Sosial</title>
-   586→  ${formCSS()}
-   587→  <style>
-   588→    @page { size: A4 landscape; margin: 12mm; }
-   589→    .page-break { page-break-after: always; }
-   590→    .page-break:last-child { page-break-after: auto; }
-   591→    .cover-page { height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; page-break-after: always; }
-   592→    .cover-page h1 { font-size: 28px; color: #1e3a5f; margin-bottom: 8px; }
-   593→    .cover-page h2 { font-size: 18px; color: #1e3a5f; }
-   594→  </style>
-   595→</head>
-   596→<body>
-   597→  <div class="cover-page">
-   598→    ${kemsosLogo().replace('width="64" height="74"', 'width="110" height="126"')}
-   599→    <h1 style="margin-top:24px;">KEMENTERIAN SOSIAL RI</h1>
-   600→    <h2>Program Keluarga Harapan</h2>
-   601→    <p style="font-size:14px;margin-top:12px;">Dokumen Gabungan Verifikasi Komitmen PKH</p>
-   602→    <p style="font-size:12px;color:#64748b;">${forms.length} Formulir • Periode ${forms[0]?.periode || ''}</p>
-   603→  </div>
-   604→  ${pages}
-   605→</body>
-   606→</html>`
-   607→}
-   608→
-   609→// Form body without html/head wrapper (for combined doc)
-   610→function generateFormBody(data: PKHFormData): string {
-   611→  const full = generateFormHTML(data)
-   612→  const bodyMatch = full.match(/<body>([\s\S]*)<\/body>/)
-   613→  return bodyMatch ? bodyMatch[1] : full
-   614→}
-   615→
+   456→  // Identity info block (form-type specific)
+   457→  let identityHTML: string
+   458→  if (data.formType === 'education') {
+   459→    identityHTML = `
+   460→    <div class="school-info">
+   461→      <div class="inline-row">
+   462→        <div class="item"><span class="label">NPSN</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
+   463→        <div class="item"><span class="label">Nama Sekolah</span><span class="sep">:</span><span>${data.namaSekolah || '-'}</span></div>
+   464→      </div>
+   465→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
+   466→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
+   467→    </div>`
+   468→  } else if (data.formType === 'health') {
+   469→    identityHTML = `
+   470→    <div class="school-info">
+   471→      <div class="inline-row">
+   472→        <div class="item"><span class="label">Posyandu</span><span class="sep">:</span><span>${data.namaSekolah || '-'}</span></div>
+   473→        <div class="item"><span class="label">Kode Wilayah</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
+   474→      </div>
+   475→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
+   476→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
+   477→    </div>`
+   478→  } else {
+   479→    identityHTML = `
+   480→    <div class="school-info">
+   481→      <div class="inline-row">
+   482→        <div class="item"><span class="label">Wilayah Layanan</span><span class="sep">:</span><span>${data.namaSekolah || data.kelurahan || '-'}</span></div>
+   483→        <div class="item"><span class="label">Kode</span><span class="sep">:</span><span>${data.npsn || '-'}</span></div>
+   484→      </div>
+   485→      <div class="row"><span class="label">Alamat</span><span class="sep">:</span><span>${data.alamatSekolah || data.kelurahan || '-'}</span></div>
+   486→      <div class="row"><span class="label">Wilayah</span><span class="sep">:</span><span>Kec. ${data.kecamatan || '-'}, Kab. ${data.kabupaten || '-'}, Prov. ${data.provinsi || '-'}</span></div>
+   487→    </div>`
+   488→  }
+   489→
+   490→  const summaryHTML = `
+   491→    <div class="summary-row">
+   492→      <div class="summary-card"><div class="label">Total ${data.formType === 'education' ? 'Siswa' : 'Peserta'}</div><div class="value">${total}</div></div>
+   493→      <div class="summary-card"><div class="label">Rata-rata Kehadiran</div><div class="value">${avgAttendance}%</div></div>
+   494→      <div class="summary-card"><div class="label">Periode</div><div class="value" style="font-size:10px;">${data.periode}</div></div>
+   495→      <div class="summary-card"><div class="label">Kategori</div><div class="value" style="font-size:11px;">${label}</div></div>
+   496→    </div>`
+   497→
+   498→  const legendHTML = `
+   499→    <div class="legend">
+   500→      <div class="legend-item"><span class="check-mark">${checkSVG(0)}</span> Hadir/Terlayani (≥75%)</div>
+   501→      <div class="legend-item"><span style="display:inline-block;width:15px;color:#94a3b8;font-size:13px;">—</span> Tidak Hadir (&lt;75%)</div>
+   502→      <div class="legend-item"><strong>HE</strong> = Hari Efektif</div>
+   503→      <div class="legend-item"><strong>A</strong> = Alpa</div>
+   504→      <div class="legend-item"><strong>I</strong> = Izin</div>
+   505→      <div class="legend-item"><strong>S</strong> = Sakit</div>
+   506→      <div class="legend-item"><strong>JML</strong> = HE − A − I − S</div>
+   507→      <div class="legend-item"><strong>%</strong> = (JML ÷ HE) × 100</div>
+   508→    </div>`
+   509→
+   510→  const today = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })
+   511→  const placeDate = `${data.kelurahan || data.kecamatan || ''}${data.kelurahan ? ', ' : ''}${today}`
+   512→
+   513→  return `<!DOCTYPE html>
+   514→<html lang="id">
+   515→<head>
+   516→  <meta charset="UTF-8" />
+   517→  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+   518→  <title>${title} - PKH</title>
+   519→  ${formCSS()}
+   520→</head>
+   521→<body>
+   522→  <div class="page">
+   523→    <div class="form-header">
+   524→      <div class="header-left">
+   525→        ${kemsosLogo(data.logoUrl)}
+   526→        <div class="header-title">
+   527→          <h1>${title}</h1>
+   528→          <h2>${subtitle}</h2>
+   529→          <div class="subtitle">PERIODE: ${data.periode}</div>
+   530→        </div>
+   531→      </div>
+   532→      <div class="header-right">
+   533→        <div class="doc-id">PKH-${data.formType.toUpperCase().slice(0, 3)}-${data.tahun || new Date().getFullYear()}</div>
+   534→        <div>Triwulan ${data.triwulan || ''}</div>
+   535→        <div style="color:#1e3a5f;font-weight:bold;margin-top:3px;">☑ Disahkan dengan BSrE</div>
+   536→      </div>
+   537→    </div>
+   538→
+   539→    ${identityHTML}
+   540→    ${summaryHTML}
+   541→    ${tableHTML}
+   542→    ${legendHTML}
+   543→
+   544→    <div class="note-box">
+   545→      <strong>Catatan:</strong>
+   546→      <ul>
+   547→        <li><strong>JML</strong> = Hari Efektif − Alpa − Izin − Sakit</li>
+   548→        <li><strong>%</strong> = (JML ÷ Hari Efektif) × 100</li>
+   549→        <li>Verifikasi kehadiran telah dilakukan oleh Pendamping PKH</li>
+   550→      </ul>
+   551→    </div>
+   552→
+   553→    <div class="form-footer">
+   554→      <div class="signature-area">
+   555→        <div class="place-date">${placeDate}</div>
+   556→        <div class="role-label">Mengetahui,<br/>${data.signerRole}</div>
+   557→        ${signatureBlock(data.signerName, data.signerNIP, data.signerRole)}
+   558→      </div>
+   559→    </div>
+   560→
+   561→    <div class="bsre-note">
+   562→      Dokumen ini telah diverifikasi dan ditandatangani secara elektronik menggunakan sertifikat
+   563→      <strong>BSrE (Badan Siber dan Sandi Negara)</strong>.<br/>
+   564→      Status keaslian dapat diverifikasi melalui <strong>validasi.bsre.bssn.go.id</strong>
+   565→    </div>
+   566→  </div>
+   567→</body>
+   568→</html>`
+   569→}
+   570→
+   571→/* ============================================================
+   572→   Build combined HTML document (multiple forms with page breaks)
+   573→   ============================================================ */
+   574→export function generateCombinedHTML(forms: PKHFormData[]): string {
+   575→  const pages = forms
+   576→    .map((f) => `<div class="page-break">${generateFormBody(f)}</div>`)
+   577→    .join('')
+   578→
+   579→  return `<!DOCTYPE html>
+   580→<html lang="id">
+   581→<head>
+   582→  <meta charset="UTF-8" />
+   583→  <title>Dokumen Gabungan PKH - Kementerian Sosial</title>
+   584→  ${formCSS()}
+   585→  <style>
+   586→    @page { size: A4 landscape; margin: 12mm; }
+   587→    .page-break { page-break-after: always; }
+   588→    .page-break:last-child { page-break-after: auto; }
+   589→    .cover-page { height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; page-break-after: always; }
+   590→    .cover-page h1 { font-size: 28px; color: #1e3a5f; margin-bottom: 8px; }
+   591→    .cover-page h2 { font-size: 18px; color: #1e3a5f; }
+   592→  </style>
+   593→</head>
+   594→<body>
+   595→  <div class="cover-page">
+   596→    ${kemsosLogo().replace('width="64" height="74"', 'width="110" height="126"')}
+   597→    <h1 style="margin-top:24px;">KEMENTERIAN SOSIAL RI</h1>
+   598→    <h2>Program Keluarga Harapan</h2>
+   599→    <p style="font-size:14px;margin-top:12px;">Dokumen Gabungan Verifikasi Komitmen PKH</p>
+   600→    <p style="font-size:12px;color:#64748b;">${forms.length} Formulir • Periode ${forms[0]?.periode || ''}</p>
+   601→  </div>
+   602→  ${pages}
+   603→</body>
+   604→</html>`
+   605→}
+   606→
+   607→// Form body without html/head wrapper (for combined doc)
+   608→function generateFormBody(data: PKHFormData): string {
+   609→  const full = generateFormHTML(data)
+   610→  const bodyMatch = full.match(/<body>([\s\S]*)<\/body>/)
+   611→  return bodyMatch ? bodyMatch[1] : full
+   612→}
+   613→

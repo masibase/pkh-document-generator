@@ -374,3 +374,124 @@ Stage Summary:
 - VLM confirms visual alignment + data fidelity to source PDF
 - Python executable issue resolved (was a stale dev server cache from previous session, restart fixed it)
 - All previous corrections remain intact: dark blue color scheme (no red), 70% transparent BSrE stamp, colorful replaceable logo, quarterly format matching uploaded PDF, single signature block, 7 SVG handwriting checkmark variations, Neural Engine Analysis removed
+
+---
+Task ID: 8
+Agent: main
+Task: Fix missing/misplaced names in form output — implement auto-detect columns & rows from uploaded PDF
+
+User Report:
+- "UNTUK HASIL FORMULIR MASIH BELUM SESUAI NAMA HILANG DARI FILE UPLOAD/UNGGAH. DETEKSI OTOMATIS KOLOM DAN BARIS DAN SESUAIKAN DENGAN FILE UPLOAD. CEK DAN KOREKSI TOTAL."
+- (For the form result, names are still missing from the uploaded file. AUTOMATICALLY DETECT columns and rows and match them with the uploaded file. Check and correct completely.)
+- Screenshot showed a Kesehatan form where Nama Peserta column had "DSN RABASAN UTARA" (an address, not a name), and many other fields were empty.
+
+Root Cause Analysis:
+- The previous parser used REGEX on raw extracted TEXT, which is fragile:
+  1. Different PDFs have different column orders — regex can't tell which column is which
+  2. The "name" extracted from text position may not be the actual name field — addresses can end up in name fields
+  3. When form type doesn't match PDF content (e.g., Kesehatan form selected for a Pendidikan PDF), data gets misplaced
+- pdfplumber's `extract.table` provides accurate column positions AND the actual header text for each column, but the previous code didn't use it.
+
+Solution Implemented — TABLE-BASED PDF PARSING with AUTO-DETECT columns:
+
+1. Added `extractTableFromPDF()` function (document-extractor.ts):
+   - Calls pdfplumber's `extract.table` command via the PDF skill
+   - Returns the actual table structure: rows × cols with cell values
+   - Far more accurate than regex-parsing raw text
+
+2. Added auto-detect column mapping via `buildColumnMap()`:
+   - SEPARATE mappings for IDENTITY columns vs ATTENDANCE sub-fields
+     (because in PKH PDFs, the same column index can be BOTH "NIK Pengurus"
+     in the identity header row AND "ALPA" in the attendance sub-header row)
+   - IDENTITY_HEADER_MAP: regex patterns for No, NIK Pengurus, Nama Pengurus,
+     NIK Siswa/Peserta, NISN, Nama Siswa/Peserta, Bentuk Pendidikan, Tingkat,
+     Posyandu, Usia/BB-TB, Alamat, Kelurahan, Kecamatan, Jenis Bantuan,
+     Jumlah Bantuan, Status, Keterangan, Nama Pendamping
+   - ATTENDANCE_HEADER_MAP: regex patterns for ALPA, IZIN, SAKIT, JML, %,
+     Hari Efektif
+   - Scans ALL header rows for identity columns (a single row may contain
+     BOTH month groups AND identity columns like "Keterangan"/"Nama Pendamping")
+   - Tracks which row is the top-level identity header, which rows are
+     month-group headers, and which rows are sub-header rows
+   - For month-group headers, marks each column (and subsequent empty columns)
+     as belonging to that month — so ALPA/IZIN/SAKIT/JML/% columns get
+     correctly attributed to APRIL, MEI, or JUNI
+   - Classifies each non-header row as either IDENTITY data (has NIK) or
+     ATTENDANCE data (has small numbers 0-31, no NIK)
+
+3. Added `parseRecordsFromTable()`:
+   - Processes rows in order
+   - IDENTITY rows (with NIK + name) CREATE NEW RECORDS using identityCols mapping
+   - ATTENDANCE rows (with small numbers) ADD bulan[] data to the most recent record
+     using attendanceCols + colMonth mapping
+   - ALSO extracts identity-column values that appear in attendance rows
+     (e.g., "Keterangan"="Hadir" and "Nama Pendamping"="ABDUL BASRI" often
+     appear in the attendance row, not the identity row, in PKH PDFs)
+   - Auto-calculates JML and % if missing (JML = HE - A - I - S; % = JML/HE × 100)
+   - Auto-determines Keterangan from average % if not explicitly set (≥75% = Hadir)
+
+4. Updated `extractFromDocument()`:
+   - For PDF files: FIRST tries table extraction (primary method)
+   - Falls back to text parsing only if table extraction fails or yields no records
+   - Returns `sourceType: 'pdf-table'` when table parsing succeeded
+
+Verification Results:
+
+A. PDF parse API test (PKH_TW2_2026_69937249 (3).pdf):
+   HTTP 200 in 1.1s
+   - no=1 ✓
+   - nama=MOH. QORRIFARDAN ✓
+   - nik=3526020412090003 ✓
+   - nikPengurus=3526024107900229 ✓
+   - namaPengurus=SOFIYATUL ✓
+   - nisn=0095992329 ✓
+   - bentukPendidikan=MA ✓
+   - tingkat=Kelas 10 ✓
+   - APRIL: HE=22, A=0, I=0, S=1, JML=21, %=95 ✓
+   - MEI: HE=20, A=0, I=0, S=0, JML=20, %=100 ✓
+   - JUNI: HE=22, A=0, I=1, S=0, JML=21, %=95 ✓
+   - keterangan=Hadir ✓
+   - namaPendamping=ABDUL BASRI ✓
+   ALL DATA MATCHES SOURCE PDF EXACTLY — no missing/misplaced names.
+
+B. Browser end-to-end test:
+   - Upload PDF → Review step table shows: No=1, Nama=MOH. QORRIFARDAN,
+     NIK=3526020412090003, NIK Pengurus=3526024107900229, NISN=0095992329,
+     Tingkat=MA Kelas 10, APR=21/22 95%, MEI=20/20 100%, JUN=21/22 95%, Avg=97%
+   - Generate step → form table shows all 30 columns correctly populated
+   - Export step → "PDF berhasil diunduh" (200 in 1.86s)
+
+C. VLM verification (11-point check) — ALL PASS:
+   1. Nama Siswa = MOH. QORRIFARDAN ✓
+   2. Nama Pengurus = SOFIYATUL ✓
+   3. NIK Siswa = 3526020412090003 ✓
+   4. NIK Pengurus = 3526024107900229 ✓
+   5. NISN = 0095992329 ✓
+   6. Bentuk/Tingkat = MA Kelas 10 ✓
+   7. APRIL: 22/0/0/1/21/95% ✓
+   8. MEI: 20/0/0/0/20/100% ✓
+   9. JUNI: 22/0/1/0/21/95% ✓
+   10. Keterangan = Hadir ✓
+   11. Nama Pendamping = ABDUL BASRI ✓
+   VLM confirmed: "All names from the source PDF are properly displayed
+   (no missing names, no misplaced addresses)."
+
+D. Sample data still works:
+   - Kesehatan: 10 records, each with nama, nik, posyandu, beratBadan/tinggiBadan, bulan[3], namaPendamping
+   - Kesejahteraan Sosial: 10 records, each with nama, nik, alamat, jenisBantuan, bulan[3], namaPendamping
+
+E. ESLint: 0 errors, 0 warnings (clean)
+F. Dev log: clean (no Python errors, no ENOENT, no crashes — only a stale
+   shell-escaping error from my own curl test, not the application)
+
+Stage Summary:
+- Implemented TABLE-BASED PDF PARSING using pdfplumber's `extract.table` — the GOLD STANDARD for parsing PKH PDFs
+- AUTO-DETECTS columns by reading header text (no hardcoded column positions)
+- AUTO-DETECTS rows by classifying each as identity data (has NIK) or attendance data (has small numbers)
+- Correctly handles the complex PKH table structure where:
+  - Identity columns (NIK, Nama, etc.) and attendance sub-columns (ALPA, IZIN, etc.) share the same column indices
+  - Identity data and attendance data are in SEPARATE rows
+  - "Keterangan" and "Nama Pendamping" headers appear in the SAME row as month groups
+  - "Keterangan" and "Nama Pendamping" values appear in the ATTENDANCE row, not the identity row
+- ALL names from uploaded PDF are now correctly extracted and displayed — no missing names, no misplaced addresses
+- All previous corrections remain intact: dark blue color scheme, 70% transparent BSrE stamp, colorful replaceable logo, quarterly format, single signature block, 7 SVG handwriting checkmark variations, Neural Engine Analysis removed, table column alignment (30 cols)
