@@ -1118,8 +1118,22 @@ export function parseRecordsFromTable(
     }
   }
 
-  // Post-process: compute keterangan from average percent if not explicitly set
+  // Post-process: validate names and compute keterangan from average percent
   for (const record of records) {
+    // Validate name — if it looks like an address, move it to alamat
+    if (record.nama && looksLikeAddress(record.nama)) {
+      if (!record.alamat) record.alamat = record.nama
+      record.nama = ''
+    }
+    // Validate namaPengurus — if it looks like an address, clear it
+    if (record.namaPengurus && looksLikeAddress(record.namaPengurus)) {
+      record.namaPengurus = ''
+    }
+    // Validate namaPendamping — if it looks like an address, clear it
+    if (record.namaPendamping && looksLikeAddress(record.namaPendamping)) {
+      record.namaPendamping = ''
+    }
+
     if (record.bulan.length > 0) {
       const avgPct = Math.round(record.bulan.reduce((s, m) => s + m.percent, 0) / record.bulan.length)
       if (!record.keterangan || record.keterangan === 'Hadir') {
@@ -1129,6 +1143,21 @@ export function parseRecordsFromTable(
   }
 
   return records
+}
+
+// Detect if a value looks like an address rather than a person name.
+// Indonesian addresses often contain: DSN/Dusun, Jl./Jalan, RT/RW, No., Dk./Dukuh
+function looksLikeAddress(value: string): boolean {
+  const v = value.trim()
+  if (!v) return false
+  const lower = v.toLowerCase()
+  // Address indicators
+  if (/\b(dsn|dusun|dk|dukuh|jl\.?|jalan|rt\.?|rw\.?|no\.?|blok|kompleks|perum)\b/i.test(lower)) return true
+  // Contains numbers (e.g., "RT 03 RW 02", "Jl. Tamansari No. 21")
+  if (/\d{2,}/.test(v) && !/^\d/.test(v)) return true
+  // All uppercase with "UTARA"/"SELATAN"/"TIMUR"/"BARAT" (cardinal directions in addresses)
+  if (/\b(UTARA|SELATAN|TIMUR|BARAT)\b/.test(v)) return true
+  return false
 }
 
 // ---- Main entry: extract data from any supported file type ----

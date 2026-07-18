@@ -37,6 +37,17 @@ const KELURAHAN = ['Cidadap', 'Coblong', 'Dago', 'Sukajadi', 'Lebak Gede', 'Sido
 const KECAMATAN = ['Coblong', 'Sukajadi', 'Cidadap', 'Kraton']
 const KABUPATEN = ['Bandung', 'Pasuruan', 'Bandung Barat']
 const PROVINSI = ['Jawa Barat', 'Jawa Timur']
+
+// Consistent wilayah combinations (provinsi → kabupaten → kecamatan → kelurahan)
+// Prevents inconsistent combinations like "Jawa Timur + Bandung Barat"
+const WILAYAH_SETS = [
+  { provinsi: 'Jawa Barat', kabupaten: 'Bandung', kecamatan: 'Coblong', kelurahan: 'Cidadap' },
+  { provinsi: 'Jawa Barat', kabupaten: 'Bandung', kecamatan: 'Sukajadi', kelurahan: 'Sukajadi' },
+  { provinsi: 'Jawa Barat', kabupaten: 'Bandung', kecamatan: 'Coblong', kelurahan: 'Dago' },
+  { provinsi: 'Jawa Barat', kabupaten: 'Bandung Barat', kecamatan: 'Cidadap', kelurahan: 'Lebak Gede' },
+  { provinsi: 'Jawa Timur', kabupaten: 'Pasuruan', kecamatan: 'Kraton', kelurahan: 'Sidogiri' },
+  { provinsi: 'Jawa Timur', kabupaten: 'Pasuruan', kecamatan: 'Kraton', kelurahan: 'Sidogiri' },
+]
 const BANTUAN_TYPES = ['PKH Pendidikan', 'PKH Kesehatan', 'PKH Reguler', 'PKH Lanjut Usia']
 const ALAMATS = [
   'Jl. Cisitu Indah No. 12', 'Jl. Ganesha No. 8', 'Jl. Ir. H. Juanda No. 45',
@@ -81,11 +92,12 @@ export function generateSampleData(
   const hariEfektif = DEFAULT_HARI_EFEKTIF
   const records: PKHRecord[] = []
 
+  // Pick ONE consistent wilayah set for the entire form
+  const wilayah = rand(WILAYAH_SETS)
+
   for (let i = 0; i < count; i++) {
     const isMale = Math.random() > 0.5
     const nama = isMale ? rand(NAMES_M) : rand(NAMES_F)
-    const kelurahan = rand(KELURAHAN)
-    const kecamatan = rand(KECAMATAN)
 
     const base: PKHRecord = {
       no: i + 1,
@@ -94,8 +106,8 @@ export function generateSampleData(
       tanggalLahir: genTanggalLahir(),
       jenisKelamin: isMale ? 'L' : 'P',
       alamat: rand(ALAMATS),
-      kelurahan,
-      kecamatan,
+      kelurahan: wilayah.kelurahan,
+      kecamatan: wilayah.kecamatan,
       bulan: months.map((m) => randomMonthAttendance(m, hariEfektif)),
       keterangan: 'Hadir',
       namaPendamping: 'ABDUL BASRI',
@@ -126,20 +138,18 @@ export function generateSampleData(
     records.push(base)
   }
 
-  const provinsi = rand(PROVINSI)
-  const kabupaten = rand(KABUPATEN)
-
+  // Use the wilayah set picked at the top of this function (consistent for all records)
   return {
     formType,
     periode: `TRIWULAN ${triwulan} TAHUN ${tahun}`,
     triwulan,
     tahun,
-    provinsi,
-    kabupaten,
-    kecamatan: rand(KECAMATAN),
-    kelurahan: rand(KELURAHAN),
+    provinsi: wilayah.provinsi,
+    kabupaten: wilayah.kabupaten,
+    kecamatan: wilayah.kecamatan,
+    kelurahan: wilayah.kelurahan,
     npsn: String(randInt(10000000, 99999999)),
-    namaSekolah: formType === 'education' ? rand(SCHOOLS) : (formType === 'health' ? rand(POSYANDU) : `Wilayah ${rand(KELURAHAN)}`),
+    namaSekolah: formType === 'education' ? rand(SCHOOLS) : (formType === 'health' ? rand(POSYANDU) : `Wilayah ${wilayah.kelurahan}`),
     alamatSekolah: rand(ALAMATS),
     signerName: 'H. MOH. HANSAN, S.Pd.I, M.Pd',
     signerNIP: '196807151993031008',

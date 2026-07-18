@@ -252,32 +252,89 @@ function formCSS(): string {
 
 /* ============================================================
    Random attendance generator — average 90-100%
-   Generates ALPA/IZIN/SAKIT values so % falls in 90-100% range
+   Generates ALPA/IZIN/SAKIT values so % falls in 90-100% range.
+
+   BUG FIX (previous version):
+   - alpa was random 0-1 regardless of `absent`, so when target=100%
+     (absent=0) alpa could still be 1, dropping actual % below target.
+   - For small hariEfektif (e.g. 5), this could push % down to 80%.
+   FIX:
+   - alpa is now capped at `absent` (cannot exceed absent days).
+   - All absent days are distributed exactly across alpa/izin/sakit.
+   - Recompute % from final jml/he so display always matches math.
    ============================================================ */
 export function randomMonthAttendance(
   monthName: string,
   hariEfektif = 22
 ): MonthAttendance {
+  const he = Math.max(1, hariEfektif) // guard against divide-by-zero
   // Target percent between 90-100%
   const targetPercent = 90 + Math.floor(Math.random() * 11) // 90-100
-  const absent = Math.round(((100 - targetPercent) / 100) * hariEfektif)
-  // Distribute absent days across alpa/izin/sakit (prefer izin/sakit, low alpa)
-  const alpa = Math.floor(Math.random() * 2) // 0-1
-  const sakit = Math.floor(Math.random() * (absent - alpa + 1))
-  const izin = Math.max(0, absent - alpa - sakit)
-  const jml = Math.max(0, hariEfektif - alpa - izin - sakit)
-  const percent = Math.round((jml / hariEfektif) * 100)
-  return { nama: monthName, hariEfektif, alpa, izin, sakit, jml, percent }
+  const absent = Math.round(((100 - targetPercent) / 100) * he)
+  // Distribute absent days across alpa/izin/sakit
+  // alpa is capped at absent (prefer izin/sakit over alpa)
+  const maxAlpa = Math.min(1, absent)
+  const alpa = Math.floor(Math.random() * (maxAlpa + 1)) // 0..maxAlpa
+  const remaining = absent - alpa
+  const sakit = Math.floor(Math.random() * (remaining + 1)) // 0..remaining
+  const izin = Math.max(0, remaining - sakit)
+  const jml = Math.max(0, he - alpa - izin - sakit)
+  const percent = Math.round((jml / he) * 100)
+  return { nama: monthName, hariEfektif: he, alpa, izin, sakit, jml, percent }
 }
 
-// Build a single student row's attendance cells for all 3 months
+/* ============================================================
+   Ensure a record's bulan array always has exactly 3 entries
+   matching the form's months. Pads missing months with default
+   attendance and trims extras. This prevents column misalignment
+   in the rendered form table.
+   ============================================================ */
+export function normalizeBulan(
+  bulan: MonthAttendance[] | undefined,
+  months: string[],
+  hariEfektif = 22
+): MonthAttendance[] {
+  if (!bulan || bulan.length === 0) {
+    return months.map((m) => randomMonthAttendance(m, hariEfektif))
+  }
+  // Map existing bulan by month name (case-insensitive)
+  const existingMap = new Map<string, MonthAttendance>()
+  for (const b of bulan) {
+    if (b && b.nama) existingMap.set(b.nama.toLowerCase(), b)
+  }
+  return months.map((m) => {
+    const found = existingMap.get(m.toLowerCase())
+    if (found) {
+      // Validate and fix math consistency
+      const he = Math.max(1, found.hariEfektif || hariEfektif)
+      const alpa = Math.max(0, found.alpa || 0)
+      const izin = Math.max(0, found.izin || 0)
+      const sakit = Math.max(0, found.sakit || 0)
+      // If jml is missing or inconsistent, recompute from he - absences
+      const calcJml = Math.max(0, he - alpa - izin - sakit)
+      const jml = found.jml && found.jml > 0 ? found.jml : calcJml
+      // Always recompute % to guarantee display matches math
+      const percent = Math.round((jml / he) * 100)
+      return { nama: m, hariEfektif: he, alpa, izin, sakit, jml, percent }
+    }
+    // Missing month — generate random attendance
+    return randomMonthAttendance(m, hariEfektif)
+  })
+}
+
+// Build a single student row's attendance cells for all 3 months.
+// Uses normalizeBulan to guarantee exactly 3 months × 7 cells = 21 cells,
+// preventing column misalignment when bulan is empty/partial.
 function buildAttendanceCells(
   record: PKHRecord,
-  rowIdx: number
+  rowIdx: number,
+  months: string[],
+  hariEfektif: number
 ): string {
-  const months = record.bulan || []
-  return months
+  const bulan = normalizeBulan(record.bulan, months, hariEfektif)
+  return bulan
     .map((m, mi) => {
+      // Checkmark shown when month's % >= 75 (per-month Hadir status)
       const present = m.percent >= 75
       return `
       <td class="qty-col" style="font-size:8px;">${m.hariEfektif}</td>
@@ -292,10 +349,13 @@ function buildAttendanceCells(
 }
 
 // Calculate hari efektif header row for the month group
+// Uses normalizeBulan on the first record to get a consistent 3-month array.
 function buildEffDayRow(months: string[], sample: PKHRecord[]): string {
+  const firstBulan = normalizeBulan(sample[0]?.bulan, months, 22)
   return months
     .map((m) => {
-      const he = sample[0]?.bulan?.find((b) => b.nama === m)?.hariEfektif || 22
+      const found = firstBulan.find((b) => b.nama.toLowerCase() === m.toLowerCase())
+      const he = found?.hariEfektif || 22
       return `<td class="eff-day" colspan="7">Hari Efektif: ${he}</td>`
     })
     .join('')
@@ -392,14 +452,19 @@ function buildAttendanceTable(data: PKHFormData): string {
 
   const rows = data.records
     .map((r, idx) => {
-      const avgPct = r.bulan.length
-        ? Math.round(r.bulan.reduce((s, m) => s + m.percent, 0) / r.bulan.length)
+      // Normalize bulan to exactly 3 months for consistent rendering
+      const bulan = normalizeBulan(r.bulan, months, 22)
+      // Average percent across all 3 months
+      const avgPct = bulan.length
+        ? Math.round(bulan.reduce((s, m) => s + m.percent, 0) / bulan.length)
         : 0
+      // Keterangan = overall Hadir status (avg >= 75)
+      // Per-month checkmarks may differ (some months could be < 75%)
       const keterangan = avgPct >= 75 ? 'Hadir' : 'Tidak Hadir'
       return `
       <tr>
         ${renderIdCells(r)}
-        ${buildAttendanceCells(r, idx)}
+        ${buildAttendanceCells(r, idx, months, 22)}
         <td style="font-size:8px;font-weight:600;color:${avgPct >= 75 ? '#16a34a' : '#1e3a5f'};">${keterangan}</td>
         <td style="font-size:8px;">${r.namaPendamping || data.facilitator || '-'}</td>
       </tr>`
