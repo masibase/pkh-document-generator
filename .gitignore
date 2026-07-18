@@ -60,6 +60,11 @@ server.log
 /download/
 verify-*.png
 
+# Sandbox infrastructure (not part of the app)
+/.zscripts/
+/Caddyfile
+/start-dev.sh
+
 # Database files (SQLite)
 *.db
 *.db-journal
